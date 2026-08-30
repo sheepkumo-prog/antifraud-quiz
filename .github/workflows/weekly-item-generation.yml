@@ -1,0 +1,72 @@
+# =====================================================================
+#  題庫自動生成排程
+#  放置位置：你的 GitHub 儲存庫的 .github/workflows/weekly-item-generation.yml
+#
+#  設定前置作業：
+#  1. 建一個 GitHub 儲存庫（可設為 Private）
+#  2. 把 generate_items.py 與 requirements.txt 放進 pipeline/ 資料夾
+#  3. 儲存庫 → Settings → Secrets and variables → Actions → New repository secret
+#     依序新增三個：
+#       SUPABASE_URL          你的 Supabase 專案網址
+#       SUPABASE_SERVICE_KEY  service_role 金鑰（Settings → API → service_role）
+#       ANTHROPIC_API_KEY     Claude API 金鑰
+#
+#  ⚠ service_role 金鑰可以繞過所有權限控管，只能放在 Secrets，
+#    絕對不要寫進程式碼或前端 HTML。
+# =====================================================================
+
+name: 每週題庫生成
+
+on:
+  schedule:
+    # UTC 19:00 = 臺灣時間週一 03:00
+    - cron: '0 19 * * 0'
+  workflow_dispatch:          # 允許手動觸發，方便測試
+    inputs:
+      dry_run:
+        description: '試跑（不寫入資料庫）'
+        type: boolean
+        default: false
+      max_methods:
+        description: '單次最多處理幾個手法'
+        default: '3'
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 取出程式碼
+        uses: actions/checkout@v4
+
+      - name: 安裝 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 安裝套件
+        run: pip install -r pipeline/requirements.txt
+
+      - name: 執行題庫生成
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+          MAX_METHODS_PER_RUN:  ${{ github.event.inputs.max_methods || '3' }}
+          ITEMS_PER_METHOD:     '6'
+          DRY_RUN:              ${{ github.event.inputs.dry_run == 'true' && '1' || '' }}
+        run: python pipeline/generate_items.py
+
+      - name: 失敗時建立 Issue 通知
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `題庫生成失敗 — ${new Date().toISOString().slice(0,10)}`,
+              body: `本週排程執行失敗，請查看 [執行紀錄](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})。\n\n網站題庫維持原狀，不影響受試者使用。`
+            })
