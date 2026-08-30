@@ -153,7 +153,11 @@ const CONFIG = {
   ]
 };
 const TYPE_NAME = { tf:'是非選擇題', trap:'陷阱題', sim:'情境模擬題' };
-const AGE_GROUPS = ['18-29','30-49','50-64','65 歲以上'];
+/* 人口變項。性別與教育程度之納入，依據于小軒[3]所述型態與族群之對應關係。
+   各項均提供「不願提供」，避免因強制填答而排除受試者。 */
+const AGE_GROUPS  = ['18-29 歲','30-49 歲','50-64 歲','65 歲以上','不願提供'];
+const GENDERS     = ['男','女','其他','不願提供'];
+const EDUCATIONS  = ['國中以下','高中職','專科或大學','研究所以上','不願提供'];
 
 /* ---------------- 全域狀態 ---------------- */
 let sb = null;              // Supabase client
@@ -218,7 +222,8 @@ async function boot(){
     const local = lsGet() || { guest_code:'L-'+Math.random().toString(36).slice(2,10).toUpperCase(),
                                score:0, tier_idx:0, visits:0, log:[] };
     lsSet(local);
-    me = { id:null, guest_code:local.guest_code, age_group:local.age_group||null };
+    me = { id:null, guest_code:local.guest_code, age_group:local.age_group||null,
+           gender:local.gender||null, education:local.education||null };
     P = { score:local.score, tier_idx:local.tier_idx, visits:local.visits,
           cert_downloads:local.cert_downloads || 0, answered:(local.log||[]).length };
     BANK = FALLBACK_BANK.map(normalize);
@@ -351,23 +356,30 @@ function home(){
     ? '<span class="dot on"></span>已連線，作答紀錄會同步至資料庫'
     : '<span class="dot off"></span>離線模式，紀錄僅存於這台裝置';
 
-  const ageBlock = me.age_group ? '' : `
-    <div class="card">
-      <h2>開始前，請選擇你的年齡層</h2>
-      <p class="muted">此資料僅用於研究分析，不會識別個人身分。</p>
-      <label>年齡層
-        <select id="ageSel">
-          <option value="">請選擇</option>
-          ${AGE_GROUPS.map(a=>'<option>'+a+'</option>').join('')}
-        </select>
-      </label>
-      <button class="main" onclick="saveAge()">確認</button>
-    </div>`;
+  // 尚未填寫基本資料時，先顯示填答畫面，確保研究資料完整
+  if(!me.age_group){
+    const sel = (id, arr) =>
+      '<select id="'+id+'"><option value="">請選擇</option>'
+      + arr.map(a=>'<option>'+a+'</option>').join('') + '</select>';
+    app.innerHTML = `
+      <div class="card">
+        <h1>開始之前</h1>
+        <p>請先填寫三項基本資料。這些資料僅用於研究分析，不會用來識別任何個人，
+           也不會與你的作答內容以外的資訊連結。</p>
+        <label>年齡層${sel('ageSel', AGE_GROUPS)}</label>
+        <label>性別${sel('genSel', GENDERS)}</label>
+        <label>教育程度${sel('eduSel', EDUCATIONS)}</label>
+        <button class="main" onclick="saveProfile()">開始練習</button>
+        <div id="profmsg" class="muted"></div>
+      </div>`;
+    renderProgress();
+    return;
+  }
 
-  app.innerHTML = ageBlock + `
+  app.innerHTML = `
     <div class="card">
       <h1>今天練習五題，認出一種詐騙手法</h1>
-      <p class="muted">${status}　·　編號 ${me.guest_code}${me.age_group ? '　·　'+me.age_group : ''}</p>
+      <p class="muted">${status}　·　編號 ${me.guest_code}　·　${me.age_group}／${me.gender||''}／${me.education||''}</p>
       <p>答對加 ${CONFIG.gain} 分，答錯扣 ${Math.abs(CONFIG.loss)} 分。分數累積到門檻就能取得防詐意識分級證書，
          已取得的等級不會因為後來答錯而被收回。</p>
       <div class="row">${typeBtns}</div>
@@ -390,12 +402,22 @@ function home(){
   renderProgress();
 }
 
-async function saveAge(){
-  const v = document.getElementById('ageSel').value;
-  if(!v) return alert('請先選擇年齡層');
-  me.age_group = v;
-  if(online) await sb.from('participants').update({ age_group:v }).eq('id', me.id);
-  else { const l=lsGet(); l.age_group=v; lsSet(l); }
+async function saveProfile(){
+  const age = document.getElementById('ageSel').value;
+  const gen = document.getElementById('genSel').value;
+  const edu = document.getElementById('eduSel').value;
+  const msg = document.getElementById('profmsg');
+  if(!age || !gen || !edu){
+    msg.textContent = '三項都請選擇。若不想提供，可選「不願提供」。';
+    return;
+  }
+  me.age_group = age; me.gender = gen; me.education = edu;
+  if(online){
+    await sb.from('participants')
+      .update({ age_group:age, gender:gen, education:edu }).eq('id', me.id);
+  }else{
+    const l = lsGet(); l.age_group=age; l.gender=gen; l.education=edu; lsSet(l);
+  }
   home();
 }
 
