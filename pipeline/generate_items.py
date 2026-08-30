@@ -49,7 +49,15 @@ MAX_METHODS = int(os.environ.get("MAX_METHODS_PER_RUN", "3"))
 ITEMS_PER_METHOD = int(os.environ.get("ITEMS_PER_METHOD", "6"))
 DRY_RUN = os.environ.get("DRY_RUN", "") == "1"
 
-UA = "AntiFraudQuizBot/1.0 (academic research; weekly fetch)"
+# 儀錶板為單頁應用，其 API 會檢查請求來源。補齊瀏覽器標頭以正確識別請求。
+HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "zh-TW,zh;q=0.9",
+    "Referer": "https://165dashboard.tw/",
+    "Origin": "https://165dashboard.tw",
+}
 
 # 四大情境類型，依于小軒（2011）之分類
 SCENARIOS = ["動之以情", "誘之以利", "恫之以嚇", "社會系統的信賴"]
@@ -81,7 +89,12 @@ def sb(method: str, path: str, **kw) -> Any:
 # --------------------------------------------------------------------
 def fetch_methods() -> list[dict]:
     log("抓取 165 打詐儀錶板手法清單…")
-    r = requests.get(DASHBOARD_API, headers={"User-Agent": UA}, timeout=30)
+    r = requests.get(DASHBOARD_API, headers=HEADERS, timeout=30)
+    if r.status_code == 403:
+        raise RuntimeError(
+            "儀錶板拒絕本次請求（403）。此 API 可能僅接受特定來源之連線，"
+            "GitHub Actions 的伺服器位址不在允許範圍。"
+            "請改於本機環境執行本腳本，作法見 pipeline/本機執行說明.md")
     r.raise_for_status()
     data = r.json()
     if not data.get("isSuccess"):
