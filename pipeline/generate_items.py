@@ -219,7 +219,8 @@ def generate_items(method: dict) -> list[dict]:
     n_sim = max(1, n - 4)
     body = {
         "model": MODEL,
-        "max_tokens": 8000,
+        # 中文輸出的 token 消耗遠高於字元數，6 題含解析與模擬畫面需要充足空間
+        "max_tokens": 20000,
         "messages": [{
             "role": "user",
             "content": PROMPT.format(
@@ -241,14 +242,54 @@ def generate_items(method: dict) -> list[dict]:
     if r.status_code >= 400:
         raise RuntimeError(f"Claude API {r.status_code}: {r.text[:400]}")
 
-    text = "".join(b.get("text", "") for b in r.json().get("content", []))
+    data = r.json()
+    text = "".join(b.get("text", "") for b in data.get("content", []))
+    if data.get("stop_reason") == "max_tokens":
+        log("    注意：輸出達長度上限，將嘗試復原已完整生成的題目")
+    return parse_items(text)
+
+
+def parse_items(text: str) -> list[dict]:
+    """解析模型輸出。若因長度上限被截斷，保留已完整生成的物件。"""
     text = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", text.strip())
     try:
         items = json.loads(text)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"回傳非合法 JSON：{e}\n前 300 字：{text[:300]}")
-    if not isinstance(items, list):
-        raise RuntimeError("回傳不是陣列")
+        if not isinstance(items, list):
+            raise RuntimeError("回傳不是陣列")
+        return items
+    except json.JSONDecodeError:
+        pass
+
+    # 截斷復原：掃描字串外的大括號，找出最後一個完整物件的結尾
+    depth, in_str, esc, last_ok = 0, False, False, None
+    for i, ch in enumerate(text):
+        if esc:
+            esc = False
+            continue
+        if ch == "\\":
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                last_ok = i
+
+    if last_ok is None:
+        raise RuntimeError(f"回傳無法解析，且找不到任何完整題目。前 300 字：{text[:300]}")
+
+    salvaged = text[: last_ok + 1].lstrip()
+    if not salvaged.startswith("["):
+        salvaged = "[" + salvaged
+    salvaged += "]"
+    items = json.loads(salvaged)
+    log(f"    截斷復原：保留 {len(items)} 題完整題目")
     return items
 
 
