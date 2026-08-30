@@ -137,6 +137,10 @@ def diff_and_upsert(methods: list[dict]) -> list[dict]:
         elif old.get("content_hash") != h:
             log(f"  話術有變動：{row['name']}")
             changed.append(row)
+        elif old.get("processed_at") is None:
+            # 快照已存在但尚未成功生成過題目（前次生成失敗），仍須重試
+            log(f"  前次未完成，重試：{row['name']}")
+            changed.append(row)
 
         if not DRY_RUN:
             sb("POST", "fraud_methods", json=row,
