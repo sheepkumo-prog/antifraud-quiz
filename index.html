@@ -64,6 +64,21 @@ input,select{font-family:inherit;font-size:.9em;padding:12px;border:2px solid va
   border-radius:8px;width:100%;}
 label{display:block;margin-top:12px;font-size:.9em;}
 
+/* ===================== 前後測問卷 ===================== */
+.qitem{border-bottom:1px solid var(--line);padding:16px 0;}
+.qitem:last-child{border-bottom:none;}
+.qitem .qt{margin-bottom:10px;line-height:1.75;}
+.qitem .qt b{color:var(--accent);margin-right:6px;}
+.lk{display:flex;gap:6px;flex-wrap:wrap;}
+.lk.col{flex-direction:column;gap:8px;}
+.lk label{flex:1 1 100px;margin:0;text-align:center;border:2px solid var(--line);border-radius:8px;
+  padding:10px 6px;font-size:.72em;line-height:1.5;cursor:pointer;background:#fff;}
+.lk.col label{flex:none;text-align:left;font-size:.8em;padding:13px 16px;}
+.lk input{position:absolute;opacity:0;width:0;height:0;}
+.lk label.sel{border-color:var(--accent);background:var(--accent2);font-weight:700;}
+.svtitle{font-size:.8em;color:var(--sub);margin-bottom:4px;}
+.svfoot{margin-top:18px;}
+
 /* ===================== 情境模擬介面 ===================== */
 .media{margin:16px 0;}
 .phone{max-width:340px;margin:0 auto;border:9px solid #222;border-radius:26px;overflow:hidden;background:#8ba7c7;}
@@ -159,13 +174,112 @@ const AGE_GROUPS  = ['18-29 歲','30-49 歲','50-64 歲','65 歲以上','不願�
 const GENDERS     = ['男','女','其他','不願提供'];
 const EDUCATIONS  = ['國中以下','高中職','專科或大學','研究所以上','不願提供'];
 
+/* =========================================================================
+   前後測工具
+   ------------------------------------------------------------------------
+   ‧ 辨識測驗：A 卷用於前測、B 卷用於後測，兩卷為平行版本（題材對應、
+     情境類型分布相同、難度相當）。測驗過程不提供正確答案與解析，
+     以免前測本身成為介入而污染後測。
+   ‧ 自我效能與受騙易感性量表題目取自 Chung & Yeung[9] 附錄。
+     受騙易感性第 3 題為反向計分（於資料分析階段處理）。
+   ‧ 使用者感受問卷五構面各兩題，末題為操弄檢核。
+   ========================================================================= */
+
+const POST_TEST_AT   = 30;   // 練習滿此題數後觸發後測
+const FOLLOWUP_DAYS  = 14;   // 後測後間隔此天數，回訪者才觸發追蹤測驗
+
+const LIKERT = ['非常不同意','不同意','普通','同意','非常同意'];
+
+const TEST_FORMS = {
+  A: [
+    { scenario:'社會系統的信賴',
+      q:'你收到一則簡訊：「【健保署】您的健保卡因異常使用已暫停，請於今日內至 nhi-gov-tw.info 完成驗證。」你會怎麼做？',
+      options:['點連結完成驗證，以免影響就醫','不點連結，自行查健保署官方電話詢問','先回覆簡訊問是什麼異常'],
+      answer:1 },
+    { scenario:'誘之以利',
+      q:'臉書廣告點進去是一個只有商品圖與下單欄位的網頁，沒有公司名稱、統編或客服電話，付款方式只有貨到付款。這個購物網站？',
+      options:['貨到付款很安全，收到貨再付錢就好','風險很高，一頁式網站常用於販售劣質品或詐財','看評論數多不多再決定'],
+      answer:1 },
+    { scenario:'動之以情',
+      q:'陌生號碼傳 LINE 給你：「媽我手機掉了，這是新號碼，先加我。我等下有筆錢要匯，可以先借我五萬嗎？」你的第一步是？',
+      options:['先用原本存的號碼打給孩子本人確認','照新號碼回撥確認是不是本人','先借一部分，金額不大'],
+      answer:0 },
+    { scenario:'恫之以嚇',
+      q:'電話中對方自稱檢察官，說你的帳戶涉及洗錢，要你把存款匯到「監管帳戶」以證明清白，並要求全程不要掛斷、不要告訴家人。這是？',
+      options:['司法程序，應該配合','詐騙，司法機關沒有監管帳戶也不會這樣要求','先問清楚案號再決定'],
+      answer:1 },
+    { scenario:'誘之以利',
+      q:'網路上看到「海外高薪工作，月薪十萬、免經驗、包機票食宿」，對方要你先寄提款卡與存摺過去「辦理薪轉」。你的判斷是？',
+      options:['正常公司也需要帳戶匯薪水，可以寄','絕對不能寄，帳戶會被當作人頭戶，且有人身安全風險','先寄一張試試看'],
+      answer:1 },
+    { scenario:'社會系統的信賴',
+      q:'你沒有網購，卻收到一件貨到付款的包裹，上面寫著你的姓名地址，金額 380 元。你應該？',
+      options:['金額不大，先付了再說','拒收，並向家人確認是否有人代訂','拆開看看裡面是什麼再決定'],
+      answer:1 },
+  ],
+  B: [
+    { scenario:'社會系統的信賴',
+      q:'你收到一則簡訊：「【監理站】您有一筆交通罰單逾期未繳，請至 mvdis-gov.tw.cc 線上繳納，逾期加重處罰。」你會怎麼做？',
+      options:['點連結繳費，免得加重處罰','不點連結，自行至監理服務網或臨櫃查詢','回覆簡訊詢問是哪一筆罰單'],
+      answer:1 },
+    { scenario:'誘之以利',
+      q:'IG 廣告宣稱名牌包出清特價，點進去的網站商品圖片模糊、沒有退換貨說明，結帳頁要求填信用卡完整卡號與背面驗證碼。這個網站？',
+      options:['特價品本來就便宜，可以買','高度可疑，資訊不全且索取完整卡片資料','先買便宜的試單看看'],
+      answer:1 },
+    { scenario:'動之以情',
+      q:'在社群認識三週的網友，聊得很投緣，突然說有個「內線管道」可以一起投資，帶你賺錢。這時候的訊號是？',
+      options:['對方願意分享機會，代表信任你','先培養感情再談投資，是假交友真詐財的典型流程','問清楚是哪個平台再判斷'],
+      answer:1 },
+    { scenario:'恫之以嚇',
+      q:'電話中對方自稱通訊傳播委員會人員，說你的門號涉嫌發送詐騙簡訊，將為你轉接警方，並要求你「偵查不公開，不得告知任何家人」。這是？',
+      options:['配合調查，保密是法律規定','詐騙的控制手法，要求保密是為了切斷你的查證管道','先聽對方怎麼說再判斷'],
+      answer:1 },
+    { scenario:'誘之以利',
+      q:'應徵打工時，對方說「為了確認你的財力與信用」，要求你提供存摺、提款卡與網路銀行密碼。你的判斷是？',
+      options:['求職提供資料很正常，可以給','任何工作都不需要網銀密碼，這是要拿你的帳戶當人頭戶','只給存摺不給密碼應該沒關係'],
+      answer:1 },
+    { scenario:'社會系統的信賴',
+      q:'網購後接到自稱客服的電話，說你的訂單被誤設為分期付款會重複扣款，要引導你到 ATM 操作解除。你應該？',
+      options:['照做，才能取消錯誤設定','拒絕，ATM 沒有解除設定功能，只能轉帳','先到 ATM 看畫面再判斷'],
+      answer:1 },
+  ]
+};
+
+const SCALE_SE = [
+  '我相信我能成功避免自己成為詐騙的受害者',
+  '我能成功察覺潛在的詐騙',
+  '我有信心能有效辨識詐騙威脅',
+  '相較於其他人，我能分辨認識與不認識的來電者',
+];
+
+const SCALE_SUS = [
+  '只要電話響我就會接，即使不知道是誰打來',
+  '我很難結束通話，即使對方是推銷員、陌生人或我不想接的人',
+  '如果聽起來好到不像真的，通常就不是真的',
+];
+
+const UX_ITEMS = [
+  ['知覺易用性', '這個網站的操作方式很簡單，我不需要別人幫忙也會用'],
+  ['知覺易用性', '網站的文字大小與版面配置，讓我閱讀起來不費力'],
+  ['知覺有用性', '答錯後的解析，能幫助我了解詐騙集團的手法'],
+  ['知覺有用性', '相較於傳統的宣導單張，這種練習方式讓我更記得住重點'],
+  ['學習信心',   '練習之後，我更有信心判斷可疑的電話或訊息'],
+  ['學習信心',   '遇到疑似詐騙的情況時，我能想起練習中學到的應對方式'],
+  ['持續使用意圖','我願意繼續使用這個網站練習'],
+  ['持續使用意圖','如果有新的題目，我會想再回來作答'],
+  ['分級機制感受','累積分數與等級，讓我更想繼續練習'],
+  ['分級機制感受','取得防詐意識分級證書，對我而言是一件有意義的事'],
+];
+
 /* ---------------- 全域狀態 ---------------- */
 let sb = null;              // Supabase client
 let online = false;         // 是否連上資料庫
 let me = null;              // { id, guest_code, age_group }
 let P = { score:0, tier_idx:0, visits:0 };
+let A = {};                 // 已完成的測驗：{ pre:{...}, post:{...}, followup:{...} }
 let BANK = [];              // 題庫
 let round = null;
+let survey = null;          // 進行中的測驗狀態
 const app = document.getElementById('app');
 
 /* ---------------- 離線備援（localStorage） ---------------- */
@@ -211,6 +325,10 @@ async function boot(){
       .select('id', { count:'exact', head:true }).eq('participant_id', uid);
     P.answered = count || 0;
 
+    const { data:asmts } = await sb.from('assessments').select('*').eq('participant_id', uid);
+    A = {};
+    (asmts || []).forEach(a => { A[a.phase] = a; });
+
     const { data:items, error:ie } = await sb.from('items').select('*').eq('status','approved');
     if(ie) throw ie;
     BANK = (items || []).map(normalize);
@@ -226,6 +344,7 @@ async function boot(){
            gender:local.gender||null, education:local.education||null };
     P = { score:local.score, tier_idx:local.tier_idx, visits:local.visits,
           cert_downloads:local.cert_downloads || 0, answered:(local.log||[]).length };
+    A = local.assessments || {};
     BANK = FALLBACK_BANK.map(normalize);
   }
   home();
@@ -363,7 +482,7 @@ function home(){
       + arr.map(a=>'<option>'+a+'</option>').join('') + '</select>';
     app.innerHTML = `
       <div class="card">
-        <h1>開始之前</h1>
+        <h1>開始之前（第 1 步，共 2 步）</h1>
         <p>請先填寫三項基本資料。這些資料僅用於研究分析，不會用來識別任何個人，
            也不會與你的作答內容以外的資訊連結。</p>
         <label>年齡層${sel('ageSel', AGE_GROUPS)}</label>
@@ -376,12 +495,28 @@ function home(){
     return;
   }
 
+  // 尚未完成前測 → 先做前測
+  if(!A.pre){ return startSurvey('pre'); }
+
+  // 練習量已達門檻但尚未做後測 → 觸發後測
+  if(!A.post && (P.answered || 0) >= POST_TEST_AT){ return startSurvey('post'); }
+
+  // 後測完成滿一定天數後回訪 → 機會性追蹤測驗
+  if(A.post && !A.followup){
+    const days = (Date.now() - new Date(A.post.created_at).getTime()) / 86400000;
+    if(days >= FOLLOWUP_DAYS){ return startSurvey('followup'); }
+  }
+
+  const toPost = Math.max(0, POST_TEST_AT - (P.answered || 0));
+
   app.innerHTML = `
     <div class="card">
       <h1>今天練習五題，認出一種詐騙手法</h1>
       <p class="muted">${status}　·　編號 ${me.guest_code}　·　${me.age_group}／${me.gender||''}／${me.education||''}</p>
       <p>答對加 ${CONFIG.gain} 分，答錯扣 ${Math.abs(CONFIG.loss)} 分。分數累積到門檻就能取得防詐意識分級證書，
          已取得的等級不會因為後來答錯而被收回。</p>
+      ${A.post ? '<p class="muted">你已完成本次研究的所有測驗，感謝參與。之後仍可繼續練習。</p>'
+               : '<p class="muted">已練習 '+(P.answered||0)+' 題。再練習 '+toPost+' 題後，會請你填寫一份簡短的問卷。</p>'}
       <div class="row">${typeBtns}</div>
       <button class="main ghost" onclick="showCert()">查看我的證書</button>
     </div>
@@ -419,6 +554,237 @@ async function saveProfile(){
     const l = lsGet(); l.age_group=age; l.gender=gen; l.education=edu; lsSet(l);
   }
   home();
+}
+
+/* ---------------- 前測、後測與追蹤測驗 ----------------
+   前測在填完基本資料後、開始練習前施測；後測於累積練習達 POST_TEST_AT 題時觸發；
+   追蹤測驗僅在後測完成滿 FOLLOWUP_DAYS 天後、參與者自行回訪時才出現。
+   三個階段的辨識測驗一律不提供對錯回饋，避免測驗本身成為額外的學習介入。
+   ------------------------------------------------------- */
+
+const PHASE_META = {
+  pre: {
+    title: '開始之前（第 2 步，共 2 步）',
+    intro: '在開始練習之前，想先了解你現在會怎麼判斷可疑的訊息。這份問卷沒有及格與不及格，'
+         + '作答結果不會顯示對錯，也不會影響練習分數。大約需要三分鐘。',
+    done:  '謝謝你，接下來就可以開始練習了。'
+  },
+  post: {
+    title: '練習成果回饋',
+    intro: '你已經完成一段練習。以下的問題用來了解練習前後的變化，以及你對這個網站的看法。'
+         + '第三部分請依你實際的感受作答，不需要顧慮好聽與否。大約需要五分鐘。',
+    done:  '謝謝你完成這份問卷，你的回答對這項研究很有幫助。之後仍然可以繼續練習與累積分數。'
+  },
+  followup: {
+    title: '追蹤小測驗',
+    intro: '距離你上次作答已經過了一段時間。想再請你花兩分鐘做一次相同形式的測驗，'
+         + '用來了解學習效果能維持多久。',
+    done:  '謝謝你回來，這份追蹤資料對研究很重要。'
+  }
+};
+
+function otherForm(f){ return f === 'A' ? 'B' : 'A'; }
+
+// 前測隨機分派 A 或 B 卷，後測使用另一卷，追蹤測驗沿用前測題本。
+// 隨機分派可平衡兩份平行題本可能存在的難度差異。
+function pickForm(phase){
+  const pre = (A.pre && A.pre.form_version) || 'A';
+  if(phase === 'pre')  return Math.random() < 0.5 ? 'A' : 'B';
+  if(phase === 'post') return otherForm(pre);
+  return pre;
+}
+
+function surveySteps(phase){
+  return phase === 'post' ? ['rec','scale','ux'] : ['rec','scale'];
+}
+
+function startSurvey(phase){
+  survey = { phase, form:pickForm(phase), step:0, t0:Date.now(),
+             rec:[], se:[], sus:[], ux:[], noticed:null };
+  renderSurvey();
+}
+
+// 點選後標示選中的選項，不依賴 CSS :has()，較舊的瀏覽器也能正常顯示
+function lkMark(box){
+  Array.prototype.forEach.call(box.querySelectorAll('label'), lb => {
+    const inp = lb.querySelector('input');
+    lb.classList.toggle('sel', !!(inp && inp.checked));
+  });
+}
+
+function likertHTML(name, texts, startNo){
+  return texts.map((t,i)=>
+    '<div class="qitem"><div class="qt"><b>' + (startNo + i) + '.</b>' + esc(t) + '</div>'
+    + '<div class="lk" oninput="lkMark(this)">'
+    + LIKERT.map((L,k)=>'<label><input type="radio" name="'+name+i+'" value="'+(k+1)+'">'
+        + '<span>'+L+'</span></label>').join('')
+    + '</div></div>').join('');
+}
+
+function choiceHTML(name, texts, startNo){
+  return texts.map((t,i)=>
+    '<div class="qitem"><div class="qt"><b>' + (startNo + i) + '.</b>' + esc(t.q) + '</div>'
+    + '<div class="lk col" oninput="lkMark(this)">'
+    + t.options.map((o,j)=>'<label><input type="radio" name="'+name+i+'" value="'+j+'">'
+        + '<span>'+esc(o)+'</span></label>').join('')
+    + '</div></div>').join('');
+}
+
+function collect(prefix, n){
+  const out = [];
+  for(let i = 0; i < n; i++){
+    const el = document.querySelector('input[name="'+prefix+i+'"]:checked');
+    if(!el) return null;
+    out.push(Number(el.value));
+  }
+  return out;
+}
+
+function renderSurvey(){
+  const s = survey;
+  const steps = surveySteps(s.phase);
+  const key = steps[s.step];
+  const meta = PHASE_META[s.phase];
+  const last = s.step === steps.length - 1;
+  let body = '';
+
+  if(key === 'rec'){
+    body = `
+      <h2>第一部分　情境判斷</h2>
+      <p class="muted">以下六題各描述一個情境，請選出你認為最合適的做法。
+         這些題目不會顯示正確答案，請依照直覺作答即可。</p>
+      ${choiceHTML('rec', TEST_FORMS[s.form], 1)}`;
+  }else if(key === 'scale'){
+    const n1 = SCALE_SE.length;
+    body = `
+      <h2>第二部分　自我評估</h2>
+      <p class="muted">以下敘述請就你平常的情況作答，沒有標準答案。</p>
+      ${likertHTML('se',  SCALE_SE,  1)}
+      ${likertHTML('sus', SCALE_SUS, n1 + 1)}`;
+  }else{
+    const n = UX_ITEMS.length;
+    body = `
+      <h2>第三部分　使用感受</h2>
+      <p class="muted">以下是關於這個網站本身的問題。</p>
+      ${likertHTML('ux', UX_ITEMS.map(u=>u[1]), 1)}
+      <div class="qitem">
+        <div class="qt"><b>${n + 1}.</b>在練習的過程中，你有沒有注意到答對會累積分數、
+          分數達到門檻可以取得證書並解鎖新的題型？</div>
+        <div class="lk col" oninput="lkMark(this)">
+          <label><input type="radio" name="noticed" value="1"><span>有注意到</span></label>
+          <label><input type="radio" name="noticed" value="0"><span>沒有注意到</span></label>
+        </div>
+      </div>`;
+  }
+
+  app.innerHTML = `
+    <div class="card">
+      <div class="svtitle">${meta.title}　·　第 ${s.step + 1} 部分，共 ${steps.length} 部分</div>
+      <h1>${key === 'rec' ? '請先回答幾個問題' : (key === 'scale' ? '關於你自己' : '關於這個網站')}</h1>
+      ${s.step === 0 ? '<p>' + meta.intro + '</p>' : ''}
+      ${body}
+      <div class="svfoot">
+        <button class="main" onclick="surveyNext()">${last ? '送出' : '下一部分'}</button>
+        <div id="svmsg" class="muted"></div>
+      </div>
+    </div>`;
+  renderProgress();
+}
+
+function surveyNext(){
+  const s = survey;
+  const steps = surveySteps(s.phase);
+  const key = steps[s.step];
+  const msg = document.getElementById('svmsg');
+
+  if(key === 'rec'){
+    const v = collect('rec', TEST_FORMS[s.form].length);
+    if(!v){ msg.textContent = '還有題目沒有作答，六題都選好之後才能繼續。'; return; }
+    s.rec = v;
+  }else if(key === 'scale'){
+    const se  = collect('se',  SCALE_SE.length);
+    const sus = collect('sus', SCALE_SUS.length);
+    if(!se || !sus){ msg.textContent = '還有題目沒有作答，請全部選完再繼續。'; return; }
+    s.se = se; s.sus = sus;
+  }else{
+    const ux = collect('ux', UX_ITEMS.length);
+    const nt = document.querySelector('input[name="noticed"]:checked');
+    if(!ux || !nt){ msg.textContent = '還有題目沒有作答，請全部選完再送出。'; return; }
+    s.ux = ux; s.noticed = nt.value === '1';
+  }
+
+  if(s.step < steps.length - 1){
+    s.step += 1;
+    window.scrollTo(0, 0);
+    renderSurvey();
+  }else{
+    submitSurvey();
+  }
+}
+
+async function submitSurvey(){
+  const s = survey;
+  const items = TEST_FORMS[s.form];
+
+  let score = 0;
+  const detail = s.rec.map((pick, i) => {
+    const ok = pick === items[i].answer;
+    if(ok) score += 1;
+    return { idx:i, scenario:items[i].scenario, pick, answer:items[i].answer, correct:ok };
+  });
+
+  const rec = {
+    participant_id: me.id,
+    phase: s.phase,
+    form_version: s.form,
+    recognition_score: score,
+    recognition_detail: detail,
+    self_efficacy: s.se,
+    susceptibility: s.sus,
+    ux_survey: s.phase === 'post' ? s.ux : null,
+    noticed_mechanism: s.phase === 'post' ? s.noticed : null,
+    duration_ms: Date.now() - s.t0,
+    created_at: new Date().toISOString()
+  };
+
+  const btn = document.querySelector('.svfoot button');
+  if(btn){ btn.disabled = true; btn.textContent = '送出中…'; }
+
+  if(online){
+    const { data, error } = await sb.from('assessments')
+      .upsert(rec, { onConflict:'participant_id,phase' }).select().single();
+    if(error){
+      console.warn('測驗儲存失敗：', error.message);
+      const m = document.getElementById('svmsg');
+      if(m) m.textContent = '送出時發生問題，請檢查網路後再按一次送出。';
+      if(btn){ btn.disabled = false; btn.textContent = '送出'; }
+      return;
+    }
+    A[s.phase] = data || rec;
+  }else{
+    const l = lsGet();
+    l.assessments = l.assessments || {};
+    l.assessments[s.phase] = rec;
+    lsSet(l);
+    A[s.phase] = rec;
+  }
+
+  const phase = s.phase;
+  survey = null;
+  window.scrollTo(0, 0);
+  surveyDone(phase);
+}
+
+function surveyDone(phase){
+  app.innerHTML = `
+    <div class="card">
+      <h1>已送出</h1>
+      <p>${PHASE_META[phase].done}</p>
+      <p class="muted">依研究設計，這幾題不提供對錯回饋，以免影響你後續的判斷。
+         練習題的部分每一題答完都會附上解析。</p>
+      <button class="main" onclick="home()">${phase === 'pre' ? '開始練習' : '回到首頁'}</button>
+    </div>`;
+  renderProgress();
 }
 
 /* ---------------- 證書圖片繪製 ----------------
@@ -606,6 +972,8 @@ async function roundEnd(){
     <h1>本回合完成</h1>
     <p>答對 ${round.correct} 題，正確率 ${rate}%。</p>
     <p>目前累積 <b>${P.score}</b> 分，等級為「${CONFIG.tiers[P.tier_idx].name}」。</p>
+    ${(!A.post && (P.answered||0) >= POST_TEST_AT)
+      ? '<p class="muted">你已完成 '+P.answered+' 題練習。回到首頁時，會請你填寫一份約五分鐘的問卷。</p>' : ''}
     <button class="main" onclick="home()">回到首頁</button>
     <button class="main ghost" onclick="showCert()">查看證書</button></div>`;
   renderProgress();
