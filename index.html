@@ -170,9 +170,11 @@ const CONFIG = {
 const TYPE_NAME = { tf:'是非選擇題', trap:'陷阱題', sim:'情境模擬題' };
 /* 人口變項。性別與教育程度之納入，依據于小軒[3]所述型態與族群之對應關係。
    各項均提供「不願提供」，避免因強制填答而排除受試者。 */
-const AGE_GROUPS  = ['18-29 歲','30-49 歲','50-64 歲','65 歲以上','不願提供'];
+const AGE_GROUPS  = ['18 歲以下','19–30 歲','31–40 歲','41–50 歲','51–60 歲','61 歲以上','不願提供'];
 const GENDERS     = ['男','女','其他','不願提供'];
 const EDUCATIONS  = ['國中以下','高中職','專科或大學','研究所以上','不願提供'];
+/* 防詐資訊關注頻率：作為練習量與成效關聯之控制變項（論文 3.4 節） */
+const NEWS_FREQS  = ['從未','很少','有時','經常','幾乎每天','不願提供'];
 
 /* =========================================================================
    前後測工具
@@ -187,6 +189,12 @@ const EDUCATIONS  = ['國中以下','高中職','專科或大學','研究所以�
 
 const POST_TEST_AT   = 30;   // 練習滿此題數後觸發後測
 const FOLLOWUP_DAYS  = 14;   // 後測後間隔此天數，回訪者才觸發追蹤測驗
+
+/* 年齡層為「18 歲以下」者於前測第一部分須回答監護人同意題；
+   選擇「尚未取得」者仍可作答與練習，但資料於分析時排除（見論文 3.2.1 節）；
+   已滿 18 歲者選「不適用」。 */
+const MINOR_AGE = '18 歲以下';
+const isMinor = () => me && me.age_group === MINOR_AGE;
 
 const LIKERT = ['非常不同意','不同意','普通','同意','非常同意'];
 
@@ -299,6 +307,12 @@ async function boot(){
 
     // 匿名登入：對應論文 3.2.3 節的訪客模式
     let { data:{ session } } = await sb.auth.getSession();
+    // 研究者清除測試資料後，瀏覽器可能仍留著已被刪除帳號的登入狀態；
+    // 向伺服器確認帳號仍存在，不存在則登出並重新建立匿名帳號。
+    if(session){
+      const { error:uerr } = await sb.auth.getUser();
+      if(uerr){ await sb.auth.signOut(); session = null; }
+    }
     if(!session){
       const { error } = await sb.auth.signInAnonymously();
       if(error) throw error;
@@ -341,7 +355,7 @@ async function boot(){
                                score:0, tier_idx:0, visits:0, log:[] };
     lsSet(local);
     me = { id:null, guest_code:local.guest_code, age_group:local.age_group||null,
-           gender:local.gender||null, education:local.education||null };
+           gender:local.gender||null, education:local.education||null, news_freq:local.news_freq||null };
     P = { score:local.score, tier_idx:local.tier_idx, visits:local.visits,
           cert_downloads:local.cert_downloads || 0, answered:(local.log||[]).length };
     A = local.assessments || {};
@@ -483,11 +497,12 @@ function home(){
     app.innerHTML = `
       <div class="card">
         <h1>開始之前（第 1 步，共 2 步）</h1>
-        <p>請先填寫三項基本資料。這些資料僅用於研究分析，不會用來識別任何個人，
+        <p>請先填寫四項基本資料。這些資料僅用於研究分析，不會用來識別任何個人，
            也不會與你的作答內容以外的資訊連結。</p>
         <label>年齡層${sel('ageSel', AGE_GROUPS)}</label>
         <label>性別${sel('genSel', GENDERS)}</label>
         <label>教育程度${sel('eduSel', EDUCATIONS)}</label>
+        <label>過去一個月，你閱讀或觀看防詐相關新聞與宣導的頻率${sel('newsSel', NEWS_FREQS)}</label>
         <button class="main" onclick="saveProfile()">開始練習</button>
         <div id="profmsg" class="muted"></div>
       </div>`;
@@ -541,17 +556,18 @@ async function saveProfile(){
   const age = document.getElementById('ageSel').value;
   const gen = document.getElementById('genSel').value;
   const edu = document.getElementById('eduSel').value;
+  const news = document.getElementById('newsSel').value;
   const msg = document.getElementById('profmsg');
-  if(!age || !gen || !edu){
-    msg.textContent = '三項都請選擇。若不想提供，可選「不願提供」。';
+  if(!age || !gen || !edu || !news){
+    msg.textContent = '四項都請選擇。若不想提供，可選「不願提供」。';
     return;
   }
-  me.age_group = age; me.gender = gen; me.education = edu;
+  me.age_group = age; me.gender = gen; me.education = edu; me.news_freq = news;
   if(online){
     await sb.from('participants')
-      .update({ age_group:age, gender:gen, education:edu }).eq('id', me.id);
+      .update({ age_group:age, gender:gen, education:edu, news_freq:news }).eq('id', me.id);
   }else{
-    const l = lsGet(); l.age_group=age; l.gender=gen; l.education=edu; lsSet(l);
+    const l = lsGet(); l.age_group=age; l.gender=gen; l.education=edu; l.news_freq=news; lsSet(l);
   }
   home();
 }
@@ -653,6 +669,15 @@ function renderSurvey(){
       <h2>第一部分　情境判斷</h2>
       <p class="muted">以下六題各描述一個情境，請選出你認為最合適的做法。
          這些題目不會顯示正確答案，請依照直覺作答即可。</p>
+      ${(s.phase === 'pre' && isMinor()) ? `
+      <div class="qitem">
+        <div class="qt"><b>0.</b>若你未滿 18 歲，是否已取得父母或監護人同意，讓本研究收集你的作答資料？</div>
+        <div class="lk col" oninput="lkMark(this)">
+          <label><input type="radio" name="guardian" value="1"><span>已取得監護人同意收集資料</span></label>
+          <label><input type="radio" name="guardian" value="0"><span>尚未取得（仍可作答與練習，但資料不會用於研究分析）</span></label>
+          <label><input type="radio" name="guardian" value="na"><span>我已年滿 18 歲（不適用）</span></label>
+        </div>
+      </div>` : ''}
       ${choiceHTML('rec', TEST_FORMS[s.form], 1)}`;
   }else if(key === 'scale'){
     const n1 = SCALE_SE.length;
@@ -700,6 +725,11 @@ function surveyNext(){
   if(key === 'rec'){
     const v = collect('rec', TEST_FORMS[s.form].length);
     if(!v){ msg.textContent = '還有題目沒有作答，六題都選好之後才能繼續。'; return; }
+    if(s.phase === 'pre' && isMinor()){
+      const g = document.querySelector('input[name="guardian"]:checked');
+      if(!g){ msg.textContent = '請先回答第 0 題，選擇是否已取得監護人同意。'; return; }
+      s.guardian = g.value === 'na' ? null : g.value === '1';
+    }
     s.rec = v;
   }else if(key === 'scale'){
     const se  = collect('se',  SCALE_SE.length);
@@ -743,6 +773,7 @@ async function submitSurvey(){
     susceptibility: s.sus,
     ux_survey: s.phase === 'post' ? s.ux : null,
     noticed_mechanism: s.phase === 'post' ? s.noticed : null,
+    guardian_consent: (s.phase === 'pre' && isMinor()) ? s.guardian : null,
     duration_ms: Date.now() - s.t0,
     created_at: new Date().toISOString()
   };
