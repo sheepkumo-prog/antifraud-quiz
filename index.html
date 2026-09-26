@@ -281,7 +281,9 @@ const UX_ITEMS = [
 
 /* ---------------- 全域狀態 ---------------- */
 let sb = null;              // Supabase client
-let online = false;         // 是否連上資料庫
+let online = false;         // 是否連上資料庫（僅在 true 時寫入受試者資料）
+let reviewer = false;       // 以審核者帳號開啟時為 true：作答不寫入資料庫
+let reviewerItems = null;   // 審核者預覽模式下讀取的已上架題目
 let me = null;              // { id, guest_code, age_group }
 let P = { score:0, tier_idx:0, visits:0 };
 let A = {};                 // 已完成的測驗：{ pre:{...}, post:{...}, followup:{...} }
@@ -291,7 +293,7 @@ let survey = null;          // 進行中的測驗狀態
 const app = document.getElementById('app');
 
 /* ---------------- 離線備援（localStorage） ---------------- */
-const LKEY = 'antifraud_local_v2';
+let LKEY = 'antifraud_local_v2';   // 審核者預覽模式改用另一個儲存位置
 function lsGet(){ try{ return JSON.parse(localStorage.getItem(LKEY)) || null; }catch(e){ return null; } }
 function lsSet(o){ try{ localStorage.setItem(LKEY, JSON.stringify(o)); }catch(e){} }
 
@@ -319,6 +321,15 @@ async function boot(){
       ({ data:{ session } } = await sb.auth.getSession());
     }
     const uid = session.user.id;
+
+    // 審核者（以電子郵件登入的非匿名帳號）開啟練習網站時，
+    // 仍讀取已上架題目供預覽，但不建立參與者、不寫入任何作答資料。
+    if(session.user.is_anonymous === false || session.user.email){
+      reviewer = true;
+      const { data:items } = await sb.from('items').select('*').eq('status','approved');
+      reviewerItems = items || [];
+      throw new Error('審核者身分，改用預覽模式，作答不寫入資料庫');
+    }
 
     // 建立或取得參與者資料
     let { data:part } = await sb.from('participants').select('*').eq('id', uid).maybeSingle();
@@ -351,6 +362,12 @@ async function boot(){
   }catch(err){
     console.warn('改用離線模式：', err.message);
     online = false;
+    if(reviewer){
+      LKEY = 'antifraud_reviewer_preview';
+      document.body.insertAdjacentHTML('afterbegin',
+        '<div style="position:sticky;top:0;z-index:99;background:#b3261e;color:#fff;'
+        + 'text-align:center;padding:10px 12px;font-weight:bold">目前為審核者身分，作答不會列入研究</div>');
+    }
     const local = lsGet() || { guest_code:'L-'+Math.random().toString(36).slice(2,10).toUpperCase(),
                                score:0, tier_idx:0, visits:0, log:[] };
     lsSet(local);
@@ -359,7 +376,8 @@ async function boot(){
     P = { score:local.score, tier_idx:local.tier_idx, visits:local.visits,
           cert_downloads:local.cert_downloads || 0, answered:(local.log||[]).length };
     A = local.assessments || {};
-    BANK = FALLBACK_BANK.map(normalize);
+    BANK = (reviewer && reviewerItems && reviewerItems.length)
+      ? reviewerItems.map(normalize) : FALLBACK_BANK.map(normalize);
   }
   home();
 }
@@ -485,7 +503,9 @@ function home(){
       + TYPE_NAME[tp] + (on ? '（'+n+' 題）' : '（尚未解鎖）') + '</button>';
   }).join('');
 
-  const status = online
+  const status = reviewer
+    ? '<span class="dot off"></span>目前為審核者身分，作答不會列入研究'
+    : online
     ? '<span class="dot on"></span>已連線，作答紀錄會同步至資料庫'
     : '<span class="dot off"></span>離線模式，紀錄僅存於這台裝置';
 
@@ -542,7 +562,12 @@ function home(){
       <p class="muted">門檻分數為暫定值，正式施測前須依前導測試結果校準。</p>
     </div>
 
-    ${online ? '' : `
+    ${reviewer ? `
+    <div class="card">
+      <h2>審核者預覽模式</h2>
+      <p class="muted">目前為審核者身分，作答不會列入研究。題目來自資料庫中已上架的題目，
+         作答與分數只暫存在這台電腦的瀏覽器中。若要以受試者身分測試，請改用無痕視窗。</p>
+    </div>` : online ? '' : `
     <div class="card">
       <h2>離線模式</h2>
       <p class="muted">目前未連上資料庫，作答紀錄只存在這台電腦的瀏覽器中。請確認檔案上方的
