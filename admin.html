@@ -19,6 +19,10 @@ header{background:var(--accent);color:#fff;padding:12px 0;}
 button{font-family:inherit;font-size:.92em;border:none;border-radius:8px;padding:10px 18px;cursor:pointer;}
 .b-ok{background:var(--ok);color:#fff;} .b-no{background:var(--bad);color:#fff;}
 .b-gh{background:#fff;color:var(--accent);border:2px solid var(--accent);}
+.b-del{background:#fff;color:var(--bad);border:2px solid var(--bad);margin-left:auto;}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;}
+.tabs button{background:#fff;color:var(--accent);border:2px solid var(--line);padding:6px 14px;}
+.tabs button.on{border-color:var(--accent);background:#e8f0f7;font-weight:bold;}
 .b-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center;}
 input,textarea,select{font-family:inherit;font-size:.92em;padding:9px;border:2px solid var(--line);
   border-radius:6px;width:100%;}
@@ -64,6 +68,8 @@ const TYPE={tf:'是非選擇題',trap:'陷阱題',sim:'情境模擬題'};
 const sb = window.supabase.createClient(SB_URL, SB_KEY);
 const app = document.getElementById('app');
 let rows = [];
+let view = 'draft';   // 目前檢視的狀態：draft 待審、approved 已上架、retired 已退回或下架
+const VIEW_NAME = { draft:'待審', approved:'已上架', retired:'已退回／下架' };
 
 init();
 
@@ -96,7 +102,7 @@ async function doLogin(){
 async function load(){
   app.innerHTML = '<div class="card">載入中…</div>';
   const { data, error } = await sb.from('items').select('*')
-    .eq('status','draft').order('generated_at',{ascending:false});
+    .eq('status', view).order('generated_at',{ascending:false});
   if(error){ app.innerHTML='<div class="card">讀取失敗：'+error.message+'</div>'; return; }
   rows = data || [];
   render();
@@ -120,14 +126,30 @@ function optBlock(opts, ans){
     '<div class="opt'+(i===ans?' ans':'')+'">'+(i===ans?'✔ ':'')+esc(o)+'</div>').join('');
 }
 
+function tabsHtml(){
+  return '<div class="tabs">' + Object.keys(VIEW_NAME).map(k =>
+    '<button class="'+(k===view?'on':'')+'" onclick="switchView(\''+k+'\')">'+VIEW_NAME[k]+'</button>'
+  ).join('') + '</div>';
+}
+
+function switchView(v){ view = v; load(); }
+
 function render(){
+  const tip = {
+    draft:'請逐題檢核事實正確性、答案唯一性、解析完整性與誘答選項有效性。',
+    approved:'目前在練習網站上出題的題目。發現問題時可下架；尚無人作答的題目也可直接刪除。',
+    retired:'退回或下架的題目。其審核備註會作為後續生成的負面示範，刪除後該示範也會一併消失。'
+  }[view];
   if(!rows.length){
-    app.innerHTML = '<div class="card empty"><h3>目前沒有待審題目</h3>'
-      + '<p>排程於每週一凌晨執行。若剛部署完成，可到 GitHub Actions 手動觸發一次。</p></div>';
+    app.innerHTML = '<div class="card">'+tabsHtml()+'</div>'
+      + '<div class="card empty"><h3>目前沒有'+VIEW_NAME[view]+'的題目</h3>'
+      + (view==='draft' ? '<p>題庫生成程式由排程定期執行，執行後新題目會出現在這裡。</p>' : '')
+      + '</div>';
     return;
   }
-  app.innerHTML = '<div class="card"><b>待審 '+rows.length+' 題</b>'
-    + '<p class="muted">請逐題檢核事實正確性、答案唯一性、解析完整性與誘答選項有效性。</p></div>'
+  app.innerHTML = '<div class="card">'+tabsHtml()
+    + '<p><b>'+VIEW_NAME[view]+' '+rows.length+' 題</b></p>'
+    + '<p class="muted">'+tip+'</p></div>'
     + rows.map(cardHtml).join('');
 }
 
@@ -152,18 +174,21 @@ function cardHtml(r){
     <p class="muted">${esc(r.id)}　·　${esc(r.source_note||'')}</p>
     ${r.title?'<h3>'+esc(r.title)+'</h3>':''}
     ${body}
-    <div class="chk"><b>審核檢核點</b><ul>
+    ${r.review_note ? '<p class="muted">審核備註：'+esc(r.review_note)+'</p>' : ''}
+    ${view!=='draft' ? '' : `<div class="chk"><b>審核檢核點</b><ul>
       <li>題幹所述手法是否確實存在？應對建議是否正確（申訴管道、報案程序）？</li>
       <li>題幹是否足以唯一決定正確答案，沒有第二種合理解讀？</li>
       <li>兩個誘答選項是否為真實的人可能犯的錯誤，而非明顯荒謬？</li>
       <li>解析是否說明了可辨識的線索，而不只是斷言「這是詐騙」？</li>
       <li>模擬畫面是否使用虛構機構名稱與不可連線的網址？</li>
-    </ul></div>
-    <label>審核備註（選填）<input id="n-${r.id}" placeholder="例如：修正申訴管道說法"></label>
+    </ul></div>`}
+    ${view==='retired' ? '' : `<label>${view==='draft'?'審核備註（選填）':'下架原因（選填）'}<input id="n-${r.id}" placeholder="${view==='draft'?'例如：修正申訴管道說法':'例如：發現申訴管道說法有誤'}"></label>`}
     <div class="b-row">
-      <button class="b-ok" onclick="decide('${r.id}','approved')">通過並上架</button>
-      <button class="b-no" onclick="decide('${r.id}','retired')">退回不採用</button>
+      ${view==='draft' ? `<button class="b-ok" onclick="decide('${r.id}','approved')">通過並上架</button>
+      <button class="b-no" onclick="decide('${r.id}','retired')">退回不採用</button>` : ''}
+      ${view==='approved' ? `<button class="b-no" onclick="decide('${r.id}','retired')">下架</button>` : ''}
       <span class="muted" id="m-${r.id}"></span>
+      <button class="b-del" onclick="removeItem('${r.id}')">刪除題目</button>
     </div>
   </div>`;
 }
@@ -178,8 +203,30 @@ async function decide(id, status){
   if(error){ msg.textContent = '失敗：'+error.message; return; }
   const el = document.getElementById('c-'+id);
   el.style.opacity = .45;
-  msg.textContent = status==='approved' ? '已上架' : '已退回';
+  msg.textContent = status==='approved' ? '已上架' : (view==='approved' ? '已下架' : '已退回');
   rows = rows.filter(r=>r.id!==id);
+  setTimeout(()=>{ el.remove(); if(!rows.length) render(); }, 700);
+}
+
+/* 刪除題目：呼叫資料庫函式 delete_item（見 pipeline/11_審核者刪除題目.sql）。
+   已有受試者作答的題目不允許刪除，以免逐題作答紀錄失去對應題目而影響項目分析；
+   這類題目請改用「下架」。 */
+async function removeItem(id){
+  const r = rows.find(x => x.id === id);
+  const label = (r && (r.title || r.stem) || id).slice(0, 40);
+  if(!confirm('確定要永久刪除這一題嗎？刪除後無法復原。\n\n' + label)) return;
+  const msg = document.getElementById('m-'+id);
+  msg.textContent = '刪除中…';
+  const { data, error } = await sb.rpc('delete_item', { p_id: id });
+  if(error){ msg.textContent = '刪除失敗：'+error.message; return; }
+  if(typeof data === 'string' && data.startsWith('has_responses:')){
+    msg.textContent = '已有 '+data.split(':')[1]+' 筆作答紀錄，刪除會影響項目分析，請改用「下架」。';
+    return;
+  }
+  const el = document.getElementById('c-'+id);
+  el.style.opacity = .45;
+  msg.textContent = data === 'not_found' ? '找不到這一題，可能已被刪除。' : '已刪除';
+  rows = rows.filter(x => x.id !== id);
   setTimeout(()=>{ el.remove(); if(!rows.length) render(); }, 700);
 }
 </script>
