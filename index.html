@@ -192,7 +192,9 @@ const NEWS_FREQS  = ['從未','很少','有時','經常','幾乎每天','不願�
    ========================================================================= */
 
 const POST_TEST_AT   = 30;   // 練習滿此題數後觸發後測
-const FOLLOWUP_DAYS  = 14;   // 後測後間隔此天數，回訪者才觸發追蹤測驗
+const FOLLOWUP_DAYS  = 14;
+const RETURN_AT       = 10;  // 後測後回訪，累積練習滿此題數即跳出回訪回饋表單（每人一次）
+const RETURN_MIN_DAYS = 1;   // 後測完成後至少隔幾天的作答才算「回訪」   // 後測後間隔此天數，回訪者才觸發追蹤測驗
 
 /* 年齡層為「18 歲以下」者於前測第一部分須回答監護人同意題；
    選擇「尚未取得」者仍可作答與練習，但資料於分析時排除（見論文 3.2.1 節）；
@@ -565,6 +567,9 @@ function home(){
     const days = (Date.now() - new Date(A.post.created_at).getTime()) / 86400000;
     if(days >= FOLLOWUP_DAYS){ return startSurvey('followup'); }
   }
+
+  // 後測後回訪並練習滿 RETURN_AT 題 → 回訪回饋表單（追蹤測驗之後才會出現）
+  if(A.post && !A['return'] && returnCount() >= RETURN_AT){ return renderReturn(); }
 
   const toPost = Math.max(0, POST_TEST_AT - (P.answered || 0));
 
@@ -1280,6 +1285,89 @@ async function startReview(){
   }
   await persistProgress();
   nextItem();
+}
+
+/* =========================================================================
+   回訪回饋表單（論文 3.4、3.5 節）
+   ‧ 對象：完成後測後又回訪的受試者；回訪練習滿 RETURN_AT 題時出現，每人一次。
+   ‧ 自評保留僅作為自覺指標，能力是否保留以追蹤測驗之辨識得分為準。
+   ========================================================================= */
+const RETURN_ITEMS = [
+  '和上次練習相比，我仍記得如何辨認詐騙訊息中的線索。',
+  '這次練習讓我認識了之前不知道的詐騙手法。',
+  '重做上次答錯的題目，幫助我弄清楚當初判斷錯在哪裡。',
+  '上次練習後，我在生活中遇到可疑訊息時，曾想起網站上學到的判斷方法。',
+  '上次練習後，我曾提醒家人或朋友注意某種詐騙手法。',
+  '我願意每個月回來練習一次。'
+];
+const RETURN_REASONS = ['收到提醒信','想看新題目','想提升等級','想再確認自己的判斷力','其他'];
+
+function returnCount(){
+  if(!A.post || !A.post.created_at) return 0;
+  const from = new Date(A.post.created_at).getTime() + RETURN_MIN_DAYS * 86400000;
+  return HIST.filter(h => h.created_at && new Date(h.created_at).getTime() >= from).length;
+}
+
+function renderReturn(){
+  survey = { phase:'return', t0:Date.now() };
+  app.innerHTML = `<div class="card">
+    <div class="svtitle">回訪回饋</div>
+    <h1>歡迎回來，想聽聽你的感受</h1>
+    <p>謝謝你回來練習。以下幾題想了解這段時間的學習情形，約一分鐘可以完成，沒有標準答案。</p>
+    ${likertHTML('rt', RETURN_ITEMS, 1)}
+    <div class="qitem">
+      <div class="qt"><b>${RETURN_ITEMS.length + 1}.</b>這次回來練習的原因是什麼？（可複選）</div>
+      <div class="lk col" oninput="lkMark(this)">
+        ${RETURN_REASONS.map((r,i)=>'<label><input type="checkbox" name="rr" value="'+i+'"><span>'+r+'</span></label>').join('')}
+      </div>
+    </div>
+    <div class="qitem">
+      <div class="qt"><b>${RETURN_ITEMS.length + 2}.</b>這次回來練習，你覺得最有幫助或最需要改進的是什麼？（選填）</div>
+      <textarea id="rtopen" rows="3" style="width:100%"></textarea>
+    </div>
+    <div class="svfoot">
+      <button class="main" onclick="submitReturn()">送出</button>
+      <div id="svmsg" class="muted"></div>
+    </div></div>`;
+  renderProgress();
+}
+
+async function submitReturn(){
+  const msg = document.getElementById('svmsg');
+  const lk = collect('rt', RETURN_ITEMS.length);
+  const reasons = [...document.querySelectorAll('input[name="rr"]:checked')].map(x => RETURN_REASONS[Number(x.value)]);
+  if(!lk){ msg.textContent = '還有題目沒有作答，請全部選完再送出。'; return; }
+  if(!reasons.length){ msg.textContent = '請至少勾選一個回來練習的原因。'; return; }
+  const rec = {
+    participant_id: me.id,
+    phase: 'return',
+    return_survey: lk,
+    return_reasons: reasons,
+    open_comment: document.getElementById('rtopen').value.trim() || null,
+    duration_ms: Date.now() - survey.t0,
+    created_at: new Date().toISOString()
+  };
+  const btn = document.querySelector('.svfoot button');
+  if(btn){ btn.disabled = true; btn.textContent = '送出中…'; }
+  if(online){
+    const { data, error } = await sb.from('assessments')
+      .upsert(rec, { onConflict:'participant_id,phase' }).select().single();
+    if(error){
+      console.warn('回饋儲存失敗：', error.message);
+      msg.textContent = '送出時發生問題，請檢查網路後再按一次送出。';
+      if(btn){ btn.disabled = false; btn.textContent = '送出'; }
+      return;
+    }
+    A['return'] = data || rec;
+  }else{
+    const l = lsGet(); l.assessments = l.assessments || {}; l.assessments['return'] = rec; lsSet(l);
+    A['return'] = rec;
+  }
+  survey = null;
+  window.scrollTo(0, 0);
+  app.innerHTML = `<div class="card"><h1>謝謝你的回饋</h1>
+    <p>你的意見會用來改進題庫與網站。之後仍可繼續練習。</p>
+    <button class="main" onclick="home()">回到首頁</button></div>`;
 }
 </script>
 </body>
