@@ -29,6 +29,10 @@ header{background:var(--accent);color:#fff;padding:14px 0;}
   border-radius:10px;overflow:hidden;}
 .bar span{display:block;height:100%;background:var(--ok);width:0;transition:width .4s;}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px;margin:18px 0;}
+.review{background:#fff8e6;border-left:6px solid #f0b429;border-radius:8px;padding:12px 14px;margin:12px 0;}
+.review .main{margin-top:8px;}
+.chkline{display:flex;gap:8px;align-items:flex-start;font-size:.92em;margin:10px 0;}
+.chkline input{width:auto;margin-top:6px;}
 h1{font-size:1.5em;margin:.2em 0 .6em;} h2{font-size:1.2em;margin:.2em 0 .5em;}
 .muted{color:var(--sub);font-size:.85em;}
 button.main{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:16px 26px;
@@ -284,6 +288,8 @@ let sb = null;              // Supabase client
 let online = false;         // 是否連上資料庫（僅在 true 時寫入受試者資料）
 let reviewer = false;       // 以審核者帳號開啟時為 true：作答不寫入資料庫
 let reviewerItems = null;   // 審核者預覽模式下讀取的已上架題目
+let HIST = [];              // 本人逐題作答紀錄（複習回合用）：{ item_id, is_correct, created_at, session_id }
+let SUB = null;             // 提醒信訂閱狀態
 let me = null;              // { id, guest_code, age_group }
 let P = { score:0, tier_idx:0, visits:0 };
 let A = {};                 // 已完成的測驗：{ pre:{...}, post:{...}, followup:{...} }
@@ -306,6 +312,10 @@ async function boot(){
       throw new Error('尚未填入 Supabase 連線設定');
     }
     sb = window.supabase.createClient(SB_URL, SB_KEY);
+
+    // 提醒信中的取消訂閱連結：?unsub=代碼
+    const unsub = new URLSearchParams(location.search).get('unsub');
+    if(unsub){ return showUnsubscribe(unsub); }
 
     // 匿名登入：對應論文 3.2.3 節的訪客模式
     let { data:{ session } } = await sb.auth.getSession();
@@ -354,6 +364,13 @@ async function boot(){
     A = {};
     (asmts || []).forEach(a => { A[a.phase] = a; });
 
+    const { data:hist } = await sb.from('responses')
+      .select('item_id,is_correct,created_at,session_id').eq('participant_id', uid)
+      .order('created_at', { ascending:true });
+    HIST = hist || [];
+    const { data:sub } = await sb.from('subscriptions').select('*').eq('participant_id', uid).maybeSingle();
+    SUB = sub || null;
+
     const { data:items, error:ie } = await sb.from('items').select('*').eq('status','approved');
     if(ie) throw ie;
     BANK = (items || []).map(normalize);
@@ -376,6 +393,7 @@ async function boot(){
     P = { score:local.score, tier_idx:local.tier_idx, visits:local.visits,
           cert_downloads:local.cert_downloads || 0, answered:(local.log||[]).length };
     A = local.assessments || {};
+    HIST = local.log || [];
     BANK = (reviewer && reviewerItems && reviewerItems.length)
       ? reviewerItems.map(normalize) : FALLBACK_BANK.map(normalize);
   }
@@ -389,7 +407,8 @@ function normalize(r){
     options: Array.isArray(r.options) ? r.options : (r.options ? JSON.parse(r.options) : []),
     answer:r.answer, explain:r.explain||'',
     rounds: Array.isArray(r.rounds) ? r.rounds : (r.rounds ? JSON.parse(r.rounds) : null),
-    media: (typeof r.media === 'string') ? JSON.parse(r.media) : (r.media || null)
+    media: (typeof r.media === 'string') ? JSON.parse(r.media) : (r.media || null),
+    approved_at: r.approved_at || null
   };
 }
 
@@ -525,7 +544,12 @@ function home(){
         <label>過去一個月，你閱讀或觀看防詐相關新聞與宣導的頻率${sel('newsSel', NEWS_FREQS)}</label>
         <button class="main" onclick="saveProfile()">開始練習</button>
         <div id="profmsg" class="muted"></div>
-      </div>`;
+      </div>
+      ${online ? `<div class="card">
+        <h2>之前用過這個網站？</h2>
+        <p class="muted">換了手機或瀏覽器時，輸入之前設定的編號與 4 位數 PIN，就能接續原本的分數、等級與作答紀錄。</p>
+        <button class="main ghost" onclick="restoreForm()">用回復碼找回進度</button>
+      </div>` : ''}`;
     renderProgress();
     return;
   }
@@ -552,9 +576,12 @@ function home(){
          已取得的等級不會因為後來答錯而被收回。</p>
       ${A.post ? '<p class="muted">你已完成本次研究的所有測驗，感謝參與。之後仍可繼續練習。</p>'
                : '<p class="muted">已練習 '+(P.answered||0)+' 題。再練習 '+toPost+' 題後，會請你填寫一份簡短的問卷。</p>'}
+      ${reviewHtml()}
       <div class="row">${typeBtns}</div>
       <button class="main ghost" onclick="showCert()">查看我的證書</button>
     </div>
+
+    ${accountCards()}
 
     <div class="card">
       <h2>分級與解鎖</h2>
@@ -1008,8 +1035,10 @@ async function recordAnswer(q, pick, ok, sub){
     item_id: q.id, sub_round: (sub===null? null : sub+1),
     item_type: q.type, scenario: q.scenario, tactic: q.tactic || null, level: q.level,
     chosen_index: pick, is_correct: ok,
-    response_ms: Date.now() - (round.itemStart || Date.now())
+    response_ms: Date.now() - (round.itemStart || Date.now()),
+    created_at: new Date().toISOString()
   };
+  HIST.push({ item_id:rec.item_id, is_correct:ok, created_at:rec.created_at, session_id:rec.session_id });
   if(online){ await sb.from('responses').insert(rec); }
   else { const l = lsGet(); l.log = l.log || []; l.log.push(rec); lsSet(l); }
 }
@@ -1068,6 +1097,190 @@ const FALLBACK_BANK = [
     options:['對方對自己的操作很有信心','正常的投資商品都會有這種保證','違反投資的基本原則，幾乎可以確定是詐騙'],
     answer:2, explain:'任何投資都有風險，合法金融機構依法不得保證獲利。看到「穩賺不賠」「保本高報酬」就該停下來。' }
 ];
+
+/* =========================================================================
+   回復碼：換裝置找回進度（論文 3.3.5 節）
+   ‧ 受試者自設 4 位數 PIN，搭配網站給的編號使用。
+   ‧ 驗證與資料搬移在資料庫函式 restore_identity 中完成（12_回復碼與提醒信.sql）。
+   ========================================================================= */
+function accountCards(){
+  if(!online || reviewer) return '';
+  const pinCard = me.recovery_set
+    ? `<div class="card">
+        <h2>換手機也能接續進度</h2>
+        <p>你的編號是 <b>${esc(me.guest_code)}</b>，已設定回復 PIN。換手機或瀏覽器時，
+           在第一個畫面選「用回復碼找回進度」，輸入編號與 PIN 即可。</p>
+        <button class="main ghost" onclick="pinForm()">更改 PIN</button>
+        <div id="pinbox"></div>
+      </div>`
+    : `<div class="card">
+        <h2>保存你的進度</h2>
+        <p>目前的紀錄只存在這台裝置。設定一組 4 位數 PIN 後，換手機或瀏覽器時輸入
+           編號 <b>${esc(me.guest_code)}</b> 與 PIN，就能找回分數、等級與作答紀錄。</p>
+        <p class="muted">請把編號與 PIN 記下來或拍照保存，研究者無法替你查詢 PIN。</p>
+        <div id="pinbox">${pinInputs()}</div>
+      </div>`;
+  return pinCard + subscribeCard();
+}
+
+function pinInputs(){
+  return `<label>4 位數 PIN<input id="pin1" inputmode="numeric" maxlength="4" autocomplete="off"></label>
+    <label>再輸入一次<input id="pin2" inputmode="numeric" maxlength="4" autocomplete="off"></label>
+    <button class="main" onclick="savePin()">設定 PIN</button>
+    <div id="pinmsg" class="muted"></div>`;
+}
+function pinForm(){ document.getElementById('pinbox').innerHTML = pinInputs(); }
+
+async function savePin(){
+  const a = document.getElementById('pin1').value.trim();
+  const b = document.getElementById('pin2').value.trim();
+  const msg = document.getElementById('pinmsg');
+  if(!/^\d{4}$/.test(a)){ msg.textContent = 'PIN 請輸入 4 位數字。'; return; }
+  if(a !== b){ msg.textContent = '兩次輸入不一致，請再確認。'; return; }
+  const { data, error } = await sb.rpc('set_recovery_pin', { p_pin:a });
+  if(error || data !== 'ok'){ msg.textContent = '設定失敗，請稍後再試。'; return; }
+  me.recovery_set = true;
+  home();
+}
+
+function restoreForm(){
+  app.innerHTML = `<div class="card">
+    <h1>用回復碼找回進度</h1>
+    <p>請輸入之前網站給你的編號（例如 G-1A2B3C4D）與你設定的 4 位數 PIN。</p>
+    <label>編號<input id="rcode" autocomplete="off" placeholder="G-"></label>
+    <label>PIN<input id="rpin" inputmode="numeric" maxlength="4" autocomplete="off"></label>
+    <button class="main" onclick="doRestore()">找回進度</button>
+    <button class="main ghost" onclick="home()">返回</button>
+    <div id="rmsg" class="muted"></div>
+  </div>`;
+}
+
+async function doRestore(){
+  const code = document.getElementById('rcode').value.trim().toUpperCase();
+  const pin  = document.getElementById('rpin').value.trim();
+  const msg  = document.getElementById('rmsg');
+  if(!code || !/^\d{4}$/.test(pin)){ msg.textContent = '請輸入編號與 4 位數 PIN。'; return; }
+  msg.textContent = '查詢中…';
+  const { data, error } = await sb.rpc('restore_identity', { p_code:code, p_pin:pin });
+  if(error){ msg.textContent = '發生問題，請稍後再試。'; return; }
+  const text = {
+    ok:'已找回進度，正在重新載入…',
+    not_found:'找不到這個編號，請確認是否輸入正確。',
+    no_pin:'這個編號之前沒有設定 PIN，無法找回。',
+    wrong_pin:'PIN 不正確。連續輸錯 5 次會暫停 30 分鐘。',
+    locked:'輸錯次數過多，請 30 分鐘後再試。',
+    same:'這台裝置已經是這個編號了。',
+    new_has_data:'這台裝置已經開始作答，無法再合併其他編號的紀錄。',
+    bad_input:'請輸入編號與 4 位數 PIN。'
+  }[data] || '發生問題，請稍後再試。';
+  msg.textContent = text;
+  if(data === 'ok') setTimeout(() => location.reload(), 900);
+}
+
+/* =========================================================================
+   每月提醒信訂閱（自願，18 歲以下不提供）
+   寄信由研究者電腦上的 send_reminders.py 每月執行一次。
+   ========================================================================= */
+function subscribeCard(){
+  if(me.age_group === MINOR_AGE) return '';
+  const active = SUB && !SUB.unsubscribed_at;
+  if(active){
+    return `<div class="card">
+      <h2>每月新題目提醒</h2>
+      <p>已訂閱，提醒信會寄到 <b>${esc(SUB.email)}</b>。</p>
+      <button class="main ghost" onclick="unsubscribeSelf()">取消訂閱</button>
+      <div id="submsg" class="muted"></div></div>`;
+  }
+  return `<div class="card">
+    <h2>每月新題目提醒（自願）</h2>
+    <p>題庫每週都會加入新的詐騙手法。留下 email，每月會收到一封提醒信，告訴你有幾題新題目可以練習。</p>
+    <label>Email<input id="subemail" type="email" autocomplete="email"></label>
+    <label class="chkline"><input type="checkbox" id="subok">
+      我同意本研究以此 email 每月寄送一次新題目提醒。email 只用於寄送提醒，不會與作答內容一起分析，可隨時取消。</label>
+    <button class="main" onclick="subscribe()">訂閱提醒</button>
+    <div id="submsg" class="muted"></div></div>`;
+}
+
+async function subscribe(){
+  const email = document.getElementById('subemail').value.trim();
+  const ok = document.getElementById('subok').checked;
+  const msg = document.getElementById('submsg');
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ msg.textContent = '請輸入正確的 email。'; return; }
+  if(!ok){ msg.textContent = '請勾選同意後再訂閱。'; return; }
+  const rec = { participant_id:me.id, email, consented_at:new Date().toISOString(), unsubscribed_at:null };
+  const { data, error } = await sb.from('subscriptions')
+    .upsert(rec, { onConflict:'participant_id' }).select().single();
+  if(error){ msg.textContent = '訂閱失敗，請稍後再試。'; return; }
+  SUB = data;
+  home();
+}
+
+async function unsubscribeSelf(){
+  const { error } = await sb.from('subscriptions')
+    .update({ unsubscribed_at:new Date().toISOString() }).eq('participant_id', me.id);
+  if(error){ document.getElementById('submsg').textContent = '取消失敗，請稍後再試。'; return; }
+  SUB.unsubscribed_at = new Date().toISOString();
+  home();
+}
+
+async function showUnsubscribe(token){
+  app.innerHTML = '<div class="card"><p>處理中…</p></div>';
+  const { data, error } = await sb.rpc('unsubscribe', { p_token:token });
+  const ok = !error && data === 'ok';
+  app.innerHTML = `<div class="card">
+    <h1>${ok ? '已取消訂閱' : '這個連結已失效'}</h1>
+    <p>${ok ? '之後不會再寄送提醒信給你。歡迎隨時回來練習。' : '可能已經取消過了，或連結不完整。'}</p>
+    <button class="main" onclick="location.href=location.pathname">前往練習網站</button></div>`;
+}
+
+/* =========================================================================
+   複習回合：上次答錯的題目優先，不足五題時補上還沒做過的新題目
+   ‧ 「答錯」以該題最近一次作答為準；情境模擬題任一幕答錯即視為答錯。
+   ‧ 只納入目前等級已解鎖的題型。
+   ‧ 複習回合屬練習的一部分，計分方式相同；前後測與追蹤測驗仍使用固定題本。
+   ========================================================================= */
+function reviewPool(){
+  const unlocked = unlockedTypes();
+  const usable = BANK.filter(q => unlocked.includes(q.type));
+  const byItem = {};
+  HIST.forEach(h => { (byItem[h.item_id] = byItem[h.item_id] || []).push(h); });
+  const wrong = [], fresh = [];
+  usable.forEach(q => {
+    const recs = byItem[q.id];
+    if(!recs){ fresh.push(q); return; }
+    const k = q.type === 'sim' ? (q.rounds ? q.rounds.length : 1) : 1;
+    if(recs.slice(-k).some(h => !h.is_correct)) wrong.push(q);
+  });
+  fresh.sort((a,b) => String(b.approved_at||'').localeCompare(String(a.approved_at||'')));
+  return { wrong, fresh };
+}
+
+function reviewHtml(){
+  if(!HIST.length) return '';
+  const { wrong, fresh } = reviewPool();
+  if(!wrong.length && !fresh.length) return '';
+  const nW = Math.min(wrong.length, CONFIG.perRound);
+  const nF = Math.min(fresh.length, CONFIG.perRound - nW);
+  return `<div class="review">
+    <b>複習回合</b>　上次答錯的 ${nW} 題${nF ? '＋還沒做過的新題目 '+nF+' 題' : ''}
+    <button class="main" onclick="startReview()">開始複習</button></div>`;
+}
+
+async function startReview(){
+  const { wrong, fresh } = reviewPool();
+  const picked = shuffle(wrong.slice()).slice(0, CONFIG.perRound);
+  fresh.slice(0, CONFIG.perRound - picked.length).forEach(q => picked.push(q));
+  if(!picked.length) return home();
+  round = { type:'review', items:shuffle(picked), i:0, correct:0, sessionId:null };
+  P.visits += 1;
+  if(online){
+    const { data } = await sb.from('sessions')
+      .insert({ participant_id:me.id, question_type:'review' }).select().single();
+    if(data) round.sessionId = data.id;
+  }
+  await persistProgress();
+  nextItem();
+}
 </script>
 </body>
 </html>
