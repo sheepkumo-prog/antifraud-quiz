@@ -33,6 +33,7 @@ textarea{min-height:70px;}
 .opt.ans{border-color:var(--ok);background:var(--okbg);}
 .chk{background:#fff8e6;border-left:6px solid #f0b429;padding:12px 14px;border-radius:6px;margin:12px 0;font-size:.88em;}
 .chk ul{margin:6px 0 0;padding-left:20px;}
+.lenwarn{background:#fdecea;border-left:6px solid var(--bad);padding:10px 14px;border-radius:6px;margin:10px 0;font-size:.88em;}
 .scene{background:#eef1f4;border-radius:8px;padding:12px;margin:10px 0;font-size:.86em;}
 .scene .k{color:var(--sub);font-size:.85em;}
 .empty{text-align:center;padding:60px 20px;color:var(--sub);}
@@ -153,15 +154,49 @@ function render(){
     + rows.map(cardHtml).join('');
 }
 
+/* 選項長度檢查：與 pipeline/answer_balance.py 的規則相同 */
+function optLen(s){ return String(s||'').replace(/[\s，。、；：！？「」『』（）()《》,.;:!?\-—…]/g,'').length; }
+function longAnswer(opts, ans){
+  if(!Array.isArray(opts) || typeof ans !== 'number' || ans < 0 || ans >= opts.length) return false;
+  const right = optLen(opts[ans]);
+  const m = Math.max(...opts.filter((_,i)=>i!==ans).map(optLen));
+  return right > m * 1.3 && right - m >= 3;
+}
+/* 破綻外洩檢查：與 pipeline/answer_balance.py 的規則相同 */
+const SIMP_CHARS = new Set('东个为么乐书买产亲亿仅们价众优伙会伞传伤体侦债倾儿关兴写农冻净刘则创删别剧劝办务动励劳势勋区医华协单卖卢卫厅历压县发变叙号叹吓吗听启员呜响哑唤团园围国图圣场坏块坚坛垫处备头夺奋奖妈娱孙学宁宝实宠审宪宫宽宾对寻导将尔尘尝层属岁岗岛峡币帅师帐带帮广庄庆库应废开异弃张弹强归当录彻径忆怀态总恋恶悦惊惩惯愿战户扑执扩扫扬扰抚抛抢护报担拟拥拦择挂挡挤挥损换据掷搅携摄摆摇撑敌数斋断无旧时显晋晓暂术机杀杂权条来杨极构枪柜标栈栏树样档桥梦检楼欢欧残毁毕气汇汉汤沟没沪泪泽洁浅测济浏浑浓润涨渐渔湾湿滚滞满灭灯灵灾炉点炼烂烦烧热爱爷牵犹独狮猎猪献环现电画畅疗疯皱盏盐监盖盘码础硕确祸离种积称稳穷窃竞笋笔筑签简类粮紧纠红约级纪纯纲纳纵纷纸线练组细织终绍经结绕绘给络绝统继续维综绿缓编缘缩缴网罗罚罢职联聪肃胁胜脑脚脸艰节芦苏荐荣药获营萨蓝虑虽补装见规视览觉计订认讨让训议讯记讲许论设访证评识诈诉词译试诗诚话询该详语误说请诸读课谁调谈谋谢谣谨谱贝负贡财责贤败账货质贩贪购贯贴贵贷贸费贺资赏赔赖赚赛赠赢赵赶趋跃践踪车轨转轮软轻载较辅辆输辞辩边达迁过运还这进远违连迟适选递逻遗邮邻郑酱释针钓钟钢钥钱铁银链销锁锅错键镇长门闭问闯闲间闹闻阅队阳阴阶际陆陈险随隐难页顶项顺须顽顾预领频题颜额风飞饭饮馆马驶驻驾验骗骤鱼鲜鸟鸡麦黄齐龄龙龟');
+function simpIn(t){ const out=[]; for(const ch of String(t||'')) if(SIMP_CHARS.has(ch) && !out.includes(ch)) out.push(ch); return out.join(''); }
+function leakList(q, opts){
+  const f = [];
+  const sq = simpIn(q); if(sq) f.push('題幹含簡體字「'+sq+'」');
+  (opts||[]).forEach((o,i)=>{
+    const so = simpIn(o); if(so) f.push('第 '+(i+1)+' 個選項含簡體字「'+so+'」');
+    if(/簡體|简体/.test(o||'')) f.push('第 '+(i+1)+' 個選項直接點名簡體字');
+  });
+  return f;
+}
+function leakWarn(where, list){
+  if(!list.length) return '';
+  return '<div class="lenwarn"><b>破綻外洩：</b>'+where+esc(list.join('；'))
+    + '。學習者不看模擬畫面就能從文字猜出答案。建議退回，並在備註寫「題幹或選項透露破綻」。</div>';
+}
+function lenWarn(where){
+  return '<div class="lenwarn"><b>選項長度：</b>'+where+'的正確選項明顯比誘答選項長，'
+    + '學習者可能憑長度猜中。建議退回，並在備註寫「正確選項過長」，讓生成程式之後避開。</div>';
+}
+
 function cardHtml(r){
   const body = r.type==='sim'
     ? (r.rounds||[]).map((rd,i)=>
         '<hr><div class="muted">第 '+(i+1)+' 幕</div>'
         + mediaPreview(rd.media)
         + '<p><b>'+esc(rd.q)+'</b></p>'+optBlock(rd.options, rd.answer)
+        + (r.type!=='tf' && longAnswer(rd.options, rd.answer) ? lenWarn('這一幕') : '')
+        + leakWarn('這一幕：', leakList(rd.q, rd.options))
         + '<p class="muted">解析：'+esc(rd.explain)+'</p>').join('')
     : mediaPreview(r.media)
       + '<p><b>'+esc(r.stem)+'</b></p>'+optBlock(r.options, r.answer)
+      + (r.type==='trap' && longAnswer(r.options, r.answer) ? lenWarn('這一題') : '')
+      + leakWarn('這一題：', leakList(r.stem, r.options))
       + '<p class="muted">解析：'+esc(r.explain)+'</p>';
 
   return `<div class="card" id="c-${r.id}">
