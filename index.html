@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>防詐練習網</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap">
 <style>
 :root{
   --fs:20px; --bg:#f4f6f8; --card:#fff; --ink:#1a1a1a; --sub:#555; --line:#d5dbe0;
@@ -985,53 +986,142 @@ function surveyDone(phase){
    以 canvas 直接繪製，不依賴外部函式庫，也不受網頁排版影響。
    輸出 1200×840 的 PNG，可存檔或分享至社群與家庭群組。
    -------------------------------------------------- */
-function drawCertificate(){
+/* =========================================================================
+   防詐意識分級證書（瀏覽器端以 Canvas 繪製，姓名不上傳）
+   版面：深藍外框、白色圓角內框、金色側飾條、底部弧形飾帶與等級徽章
+   ========================================================================= */
+const TIER_DESC = [
+  '能辨識最常見的四大詐騙型態之基本特徵',
+  '能在訊息中辨識超額報酬、權威宣稱等話術線索',
+  '能在多輪互動情境中判斷適當的中止與查證時機',
+  '能穩定辨識新興手法變體，並具備向他人說明之能力'
+];
+function drawCertificate(name){
   const t = CONFIG.tiers[P.tier_idx];
-  const W = 1200, H = 840;
+  const W = 1200, H = 960;
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
   const g = c.getContext('2d');
-  const FONT = '"Microsoft JhengHei","PingFang TC","Noto Sans TC",sans-serif';
+  const SANS  = '"Microsoft JhengHei","PingFang TC","Noto Sans TC",sans-serif';
+  const SERIF = '"Noto Serif TC","Songti TC","PMingLiU","MingLiU",serif';
+  const SCRIPT = '"Great Vibes","Brush Script MT","Segoe Script","Snell Roundhand",cursive';
+  const NAVY = '#13304a';
+  const gold = (x0, y0, x1, y1) => {
+    const gr = g.createLinearGradient(x0, y0, x1, y1);
+    gr.addColorStop(0, '#8a5a1c'); gr.addColorStop(.5, '#e2a63b'); gr.addColorStop(1, '#8a5a1c');
+    return gr;
+  };
+  const rr = (x, y, w, h, r) => {
+    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  };
 
-  // 底色與外框
-  g.fillStyle = '#fffdf7'; g.fillRect(0, 0, W, H);
-  g.strokeStyle = '#12507e'; g.lineWidth = 10;
-  g.strokeRect(28, 28, W - 56, H - 56);
-  g.lineWidth = 3;
-  g.strokeRect(48, 48, W - 96, H - 96);
+  // 外框與白色內框
+  g.fillStyle = NAVY; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#ffffff'; rr(80, 70, W - 160, H + 40, 70); g.fill();
 
-  g.textAlign = 'center'; g.fillStyle = '#12507e';
+  // 左右金色飾條
+  [[52, 0], [W - 70, 0]].forEach(([x]) => {
+    g.fillStyle = '#ffffff'; rr(x - 4, 250, 26, 430, 13); g.fill();
+    g.fillStyle = gold(x, 250, x, 680); rr(x, 254, 18, 422, 9); g.fill();
+  });
 
-  g.font = '600 34px ' + FONT;
-  g.fillText('防詐意識分級證書', W / 2, 168);
+  // 底部弧形飾帶：深藍主帶與兩側金色弧段
+  const cx = W / 2, cy = 2400;
+  g.lineCap = 'butt';
+  const ang = (r, x) => Math.atan2(-Math.sqrt(r * r - (x - cx) * (x - cx)), x - cx);
+  // 深藍主帶（白色描邊）
+  g.strokeStyle = '#ffffff'; g.lineWidth = 78; g.beginPath(); g.arc(cx, cy, 1600, 0, Math.PI * 2); g.stroke();
+  g.strokeStyle = NAVY; g.lineWidth = 62; g.beginPath(); g.arc(cx, cy, 1600, 0, Math.PI * 2); g.stroke();
+  // 兩側金色弧段，位於主帶下方，端點沿半徑方向切齊
+  const GR = 1528;
+  [[0, 330], [W - 330, W]].forEach(([x0, x1]) => {
+    g.strokeStyle = '#ffffff'; g.lineWidth = 46;
+    g.beginPath(); g.arc(cx, cy, GR, ang(GR, x0), ang(GR, x1)); g.stroke();
+    g.strokeStyle = gold(x0, 0, x1, 0); g.lineWidth = 34;
+    g.beginPath(); g.arc(cx, cy, GR, ang(GR, x0 + 4), ang(GR, x1 - 4)); g.stroke();
+  });
 
-  g.strokeStyle = '#c9d6e2'; g.lineWidth = 2;
-  g.beginPath(); g.moveTo(W / 2 - 200, 200); g.lineTo(W / 2 + 200, 200); g.stroke();
+  g.textAlign = 'center'; g.textBaseline = 'alphabetic';
 
-  g.font = '700 110px ' + FONT;
-  g.fillText(t.name, W / 2, 350);
+  // 標題
+  g.fillStyle = '#2b2b2b'; g.font = '110px ' + SCRIPT;
+  g.fillText('Certificate', W / 2, 215);
+  g.fillStyle = '#d18a24'; g.font = '600 30px ' + SANS;
+  g.fillText('防 詐 意 識 分 級 證 書', W / 2, 268);
 
-  g.fillStyle = '#333'; g.font = '28px ' + FONT;
-  g.fillText('累積分數　' + P.score + ' 分', W / 2, 440);
-  g.fillText('練習題數　' + (P.answered || '—') + ' 題', W / 2, 490);
-  g.fillText('編　　號　' + me.guest_code, W / 2, 540);
+  // 金色膠囊標籤
+  g.fillStyle = gold(W / 2 - 150, 0, W / 2 + 150, 0); rr(W / 2 - 150, 300, 300, 50, 25); g.fill();
+  g.fillStyle = '#ffffff'; g.font = '600 26px ' + SANS;
+  g.fillText('特 頒 此 證 予', W / 2, 335);
 
-  g.fillStyle = '#666'; g.font = '24px ' + FONT;
-  g.fillText('核發日期　' + new Date().toLocaleDateString('zh-TW'), W / 2, 620);
+  // 姓名
+  const shown = name || '防詐練習者';
+  g.fillStyle = name ? '#333333' : '#b8b8b8';
+  let size = 84;
+  do { g.font = '700 ' + size + 'px ' + SERIF; size -= 4; } while (g.measureText(shown).width > 760 && size > 40);
+  g.fillText(shown, W / 2, 455);
+  g.strokeStyle = '#e5c79a'; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(W / 2 - 300, 482); g.lineTo(W / 2 + 300, 482); g.stroke();
 
-  g.fillStyle = '#12507e'; g.font = '600 26px ' + FONT;
-  g.fillText('防詐練習網', W / 2, 700);
-  g.fillStyle = '#888'; g.font = '20px ' + FONT;
-  g.fillText('本證書為學習成果紀錄，不代表任何官方資格認證', W / 2, 740);
+  // 等級與說明
+  g.fillStyle = '#d18a24'; g.font = '700 32px ' + SANS;
+  g.fillText('達成「' + t.name + '」等級', W / 2, 540);
+  g.fillStyle = '#4a4a4a'; g.font = '24px ' + SANS;
+  g.fillText('於防詐練習網完成 ' + (P.answered || 0) + ' 題詐騙情境練習，累積 ' + P.score + ' 分，', W / 2, 588);
+  g.fillText(TIER_DESC[P.tier_idx] || '', W / 2, 626);
 
+  // 簽署欄
+  const sig = (x, line, label) => {
+    g.strokeStyle = '#d18a24'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(x - 120, 712); g.lineTo(x + 120, 712); g.stroke();
+    g.fillStyle = '#2b2b2b'; g.font = '600 24px ' + SANS; g.fillText(line, x, 700);
+    g.fillStyle = '#555555'; g.font = '700 18px ' + SANS; g.fillText(label, x, 742);
+  };
+  sig(270, '防詐練習網', '核 發 單 位');
+  sig(W - 270, new Date().toLocaleDateString('zh-TW'), '核 發 日 期');
+
+  // 等級徽章
+  const mx = W / 2, my = 760, R = 92;
+  g.fillStyle = '#ffffff'; g.beginPath(); g.arc(mx, my, R + 10, 0, Math.PI * 2); g.fill();
+  g.fillStyle = NAVY; g.beginPath();
+  for (let i = 0; i <= 48; i++) {
+    const a = i / 48 * Math.PI * 2, r = i % 2 ? R : R - 9;
+    g.lineTo(mx + Math.cos(a) * r, my + Math.sin(a) * r);
+  }
+  g.fill();
+  g.strokeStyle = '#ffffff'; g.lineWidth = 3; g.beginPath(); g.arc(mx, my, 66, 0, Math.PI * 2); g.stroke();
+  const rg = g.createRadialGradient(mx - 20, my - 20, 10, mx, my, 64);
+  rg.addColorStop(0, '#f1c46a'); rg.addColorStop(1, '#a8661f');
+  g.fillStyle = rg; g.beginPath(); g.arc(mx, my, 62, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,.75)'; g.lineWidth = 1.5; g.beginPath(); g.arc(mx, my, 54, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = '#ffffff'; g.font = '800 28px ' + SANS;
+  g.fillText(t.name.slice(0, 2), mx, my - 2);
+  g.fillText(t.name.slice(2), mx, my + 30);
+  const star = (x, y, r) => {
+    g.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + i * Math.PI / 5, rr2 = i % 2 ? r * .45 : r;
+      g.lineTo(x + Math.cos(a) * rr2, y + Math.sin(a) * rr2);
+    }
+    g.fill();
+  };
+  star(mx, my - 40, 7); star(mx - 40, my + 6, 5); star(mx + 40, my + 6, 5);
+
+  // 頁尾
+  g.fillStyle = '#8a8a8a'; g.font = '16px ' + SANS;
+  g.fillText('本證書為學習成果紀錄，不代表任何官方資格認證', W / 2, H - 22);
   return c;
 }
 
 async function downloadCert(){
-  const c = drawCertificate();
+  const nm = certName();
+  const m0 = document.getElementById('certmsg');
+  if(!nm){ if(m0) m0.textContent = '請先在上方輸入要顯示在證書上的姓名。'; document.getElementById('certname').focus(); return; }
+  const c = drawCertificate(nm);
   const a = document.createElement('a');
   a.href = c.toDataURL('image/png');
-  a.download = '防詐意識分級證書_' + CONFIG.tiers[P.tier_idx].name + '_' + me.guest_code + '.png';
+  a.download = '防詐意識分級證書_' + CONFIG.tiers[P.tier_idx].name + '_' + nm + '.png';
   a.click();
 
   // 記錄下載行為，作為證書機制是否誘發分享意願的行為指標
@@ -1176,20 +1266,47 @@ async function roundEnd(){
 }
 
 function showCert(){
+  let saved = '';
+  try{ saved = localStorage.getItem(CERT_NAME_KEY) || ''; }catch(e){}
   app.innerHTML = `<div class="card">
-    <div id="certbox" style="text-align:center;"></div>
+    <h2>我的防詐意識分級證書</h2>
+    <label>證書上要顯示的姓名
+      <input id="certname" maxlength="12" autocomplete="name" value="${esc(saved)}" placeholder="例如：王小明" oninput="updateCertName()">
+    </label>
+    <p class="muted">姓名只用來產生證書圖片，只存在這台裝置，不會上傳到資料庫。</p>
+    <div id="certbox" style="text-align:center;margin-top:12px;"></div>
     <button class="main" onclick="downloadCert()">儲存證書圖片</button>
     <div id="certmsg" class="muted" style="text-align:center;"></div>
     <button class="main ghost" onclick="home()">回到首頁</button>
     <p class="muted">證書為學習成果紀錄，不代表官方資格認證。歡迎分享給家人朋友，
        提醒身邊的人一起提高警覺。</p>
   </div>`;
-  const c = drawCertificate();
-  c.style.maxWidth = '100%';
-  c.style.border = '1px solid var(--line)';
-  c.style.borderRadius = '8px';
-  document.getElementById('certbox').appendChild(c);
+  paintCert();
   renderProgress();
+}
+
+const CERT_NAME_KEY = 'antifraud_cert_name';
+function certName(){
+  const el = document.getElementById('certname');
+  return (el ? el.value : '').trim().slice(0, 12);
+}
+function updateCertName(){
+  try{ localStorage.setItem(CERT_NAME_KEY, certName()); }catch(e){}
+  paintCert();
+}
+function paintCert(){
+  const box = document.getElementById('certbox');
+  if(!box) return;
+  const c = drawCertificate(certName());
+  c.style.maxWidth = '100%';
+  c.style.borderRadius = '8px';
+  c.style.boxShadow = '0 8px 30px rgba(0,0,0,.45)';
+  box.innerHTML = '';
+  box.appendChild(c);
+  // 英文標題使用網路字型，載入完成後重畫一次
+  if(document.fonts && !paintCert.fontReady){
+    document.fonts.load('110px "Great Vibes"').then(() => { paintCert.fontReady = true; paintCert(); }).catch(() => {});
+  }
 }
 
 /* ---------------- 字體大小：四段可選，記在這台裝置的瀏覽器 ---------------- */
