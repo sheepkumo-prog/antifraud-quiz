@@ -139,7 +139,7 @@ body{background:transparent;}
              radial-gradient(900px 500px at 0% 110%,rgba(110,60,220,.16),transparent 60%),var(--bg);}
 header{background:rgba(5,10,20,.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   border-bottom:1px solid rgba(80,130,220,.18);position:sticky;top:0;z-index:50;}
-.brand{letter-spacing:2px;background:linear-gradient(90deg,#ffffff,#8fb6ff);
+.brand{cursor:pointer;letter-spacing:2px;background:linear-gradient(90deg,#ffffff,#8fb6ff);
   -webkit-background-clip:text;background-clip:text;color:transparent;}
 .fontctl{gap:4px;color:var(--sub);}
 .fontctl .lbl{margin-right:4px;}
@@ -198,6 +198,20 @@ select option{background:#0b1322;color:var(--ink);}
 .scorebox .delta.down{color:#ff6b63;animation:floatup 1.2s ease forwards;}
 @keyframes floatup{0%{opacity:0;transform:translateY(8px)}20%{opacity:1}100%{opacity:0;transform:translateY(-22px)}}
 @media (prefers-reduced-motion: reduce){ .scorebox.bump b,.scorebox .delta{animation:none;} .scorebox .delta.up,.scorebox .delta.down{opacity:1;} }
+button.main.small{padding:10px 18px;font-size:.85em;margin-top:14px;}
+.skipbox{margin-top:22px;padding-top:14px;border-top:1px dashed rgba(255,190,80,.45);}
+.skipbox button{background:transparent;color:#ffcf7a;border:1px dashed rgba(255,190,80,.7);border-radius:10px;
+  padding:10px 16px;font-family:inherit;font-size:.85em;cursor:pointer;width:100%;}
+.skipbox .muted{margin-top:6px;}
+/* 等級徽章 */
+.tierbox{display:flex;align-items:center;gap:8px;}
+.pbadge svg{display:block;filter:drop-shadow(0 0 10px rgba(110,160,255,.45));}
+.tiertable td{vertical-align:middle;}
+.tiertable .bcell{width:64px;text-align:center;}
+.tiertable tr.locked{opacity:1;}
+.tiertable tr.locked td{color:#7d8aa0;}
+.badge.off{filter:grayscale(1) brightness(1.05);opacity:.45;}
+.fb.promo{display:flex;align-items:center;gap:14px;}
 @media (max-width:560px){ .fontctl .lbl{display:none;} .fontctl button{padding:0 9px;font-size:14px;} }
 </style>
 </head>
@@ -206,7 +220,7 @@ select option{background:#0b1322;color:var(--ink);}
 
 <header>
   <div class="hdr">
-    <div class="brand">防詐練習網</div>
+    <div class="brand" role="link" tabindex="0" title="回首頁" onclick="goHome()" onkeydown="if(event.key==='Enter')goHome()">防詐練習網</div>
     <div class="fontctl" role="group" aria-label="字體大小">
       <span class="lbl">字體大小</span>
       <button data-fs="17" onclick="setFontLevel(17)">小</button>
@@ -225,7 +239,7 @@ select option{background:#0b1322;color:var(--ink);}
       <span class="sv"><b id="pScore">0</b><small>分</small></span>
       <span class="delta" id="pDelta"></span>
     </div>
-    <div><span class="tier" id="pTier">尚未分級</span></div>
+    <div class="tierbox"><span id="pBadge" class="pbadge"></span><span class="tier" id="pTier">尚未分級</span></div>
     <div class="bar"><span id="pBar"></span></div>
     <div class="muted" id="pNext"></div>
   </div>
@@ -252,10 +266,17 @@ const SB_KEY = 'sb_publishable_Snv1OhdFcqkCehBz1DcRng_tmNacR9b';
 const CONFIG = {
   gain: 10, loss: -4, perRound: 5,
   tiers: [
-    { name:'防詐入門', min:0,   unlock:['tf'] },
-    { name:'防詐進階', min:60,  unlock:['tf','trap'] },
-    { name:'防詐高手', min:90, unlock:['tf','trap','sim'] },
-    { name:'防詐達人', min:300, unlock:['tf','trap','sim'] }
+    // 十階等級，門檻間距逐級遞增 30、40、50…；不再依等級解鎖題型
+    { name:'防詐鐵牌', min:0   },
+    { name:'防詐銅牌', min:30  },
+    { name:'防詐銀牌', min:70  },
+    { name:'防詐金牌', min:120 },
+    { name:'防詐白金', min:180 },
+    { name:'防詐翡翠', min:250 },
+    { name:'防詐鑽石', min:330 },
+    { name:'防詐大師', min:420 },
+    { name:'防詐宗師', min:520 },
+    { name:'防詐菁英', min:630 }
   ]
 };
 const TYPE_NAME = { tf:'是非選擇題', trap:'陷阱題', sim:'情境模擬題' };
@@ -443,10 +464,12 @@ async function boot(){
     me = part;
 
     const { data:prog } = await sb.from('progress').select('*').eq('participant_id', uid).maybeSingle();
-    if(prog) P = { score:prog.score, tier_idx:prog.tier_idx, visits:prog.visits,
+    if(prog) P = { score:prog.score, tier_idx:Math.min(9, Math.max(prog.tier_idx || 0, tierOf(prog.score || 0))), visits:prog.visits,
                    cert_downloads:prog.cert_downloads || 0 };
+    // 練習題數：情境模擬題不論幾幕都只算 1 題（只計第 1 幕的紀錄）
     const { count } = await sb.from('responses')
-      .select('id', { count:'exact', head:true }).eq('participant_id', uid);
+      .select('id', { count:'exact', head:true }).eq('participant_id', uid)
+      .or('sub_round.is.null,sub_round.eq.1');
     P.answered = count || 0;
 
     const { data:asmts } = await sb.from('assessments').select('*').eq('participant_id', uid);
@@ -454,7 +477,7 @@ async function boot(){
     (asmts || []).forEach(a => { A[a.phase] = a; });
 
     const { data:hist } = await sb.from('responses')
-      .select('item_id,is_correct,created_at,session_id').eq('participant_id', uid)
+      .select('item_id,is_correct,created_at,session_id,sub_round').eq('participant_id', uid)
       .order('created_at', { ascending:true });
     HIST = hist || [];
     const { data:sub } = await sb.from('subscriptions').select('*').eq('participant_id', uid).maybeSingle();
@@ -480,7 +503,7 @@ async function boot(){
     me = { id:null, guest_code:local.guest_code, age_group:local.age_group||null,
            gender:local.gender||null, education:local.education||null, news_freq:local.news_freq||null };
     P = { score:local.score, tier_idx:local.tier_idx, visits:local.visits,
-          cert_downloads:local.cert_downloads || 0, answered:(local.log||[]).length };
+          cert_downloads:local.cert_downloads || 0, answered:(local.log||[]).filter(isItemStart).length };
     A = local.assessments || {};
     HIST = local.log || [];
     BANK = (reviewer && reviewerItems && reviewerItems.length)
@@ -557,7 +580,7 @@ function renderMedia(m){
 
 /* ---------------- 進度列 ---------------- */
 function tierOf(score){ let i=0; CONFIG.tiers.forEach((t,idx)=>{ if(score>=t.min) i=idx; }); return i; }
-function unlockedTypes(){ return CONFIG.tiers[P.tier_idx].unlock; }
+function unlockedTypes(){ return ['tf','trap','sim']; }   // 三種題型一開始就全部開放
 
 let shownScore = null;
 function renderProgress(){
@@ -573,6 +596,7 @@ function renderProgress(){
   }
   shownScore = P.score;
   document.getElementById('pTier').textContent = CONFIG.tiers[P.tier_idx].name;
+  document.getElementById('pBadge').innerHTML = badgeSVG(P.tier_idx, true, 52);
   const next = CONFIG.tiers[P.tier_idx+1];
   const bar = document.getElementById('pBar');
   if(next){
@@ -619,8 +643,8 @@ function home(){
   const unlocked = unlockedTypes();
   const rows = CONFIG.tiers.map((t,i)=>{
     const got = i <= P.tier_idx;
-    return '<tr class="'+(got?'':'locked')+'"><td>'+t.name+'</td><td>'+t.min+' 分</td><td>'
-      + t.unlock.map(x=>TYPE_NAME[x]).join('、') + '</td><td>'+(got?'已取得':'未取得')+'</td></tr>';
+    return '<tr class="'+(got?'':'locked')+'"><td class="bcell">'+badgeSVG(i, got, 46)+'</td><td>'+t.name+'</td><td>'+t.min+' 分</td><td>'
+      + (got ? '已取得' : '還差 '+(t.min - P.score)+' 分') + '</td></tr>';
   }).join('');
 
   const typeBtns = ['tf','trap','sim'].map(tp=>{
@@ -653,6 +677,7 @@ function home(){
         <label>過去一個月，你閱讀或觀看防詐相關新聞與宣導的頻率${sel('newsSel', NEWS_FREQS)}</label>
         <button class="main" onclick="saveProfile()">開始練習</button>
         <div id="profmsg" class="muted"></div>
+        ${skipHtml('profile')}
       </div>
       ${online ? `<div class="card">
         <h2>之前用過這個網站？</h2>
@@ -696,8 +721,8 @@ function home(){
     ${accountCards()}
 
     <div class="card">
-      <h2>分級與解鎖</h2>
-      <table><tr><th>等級</th><th>門檻</th><th>可練習題型</th><th>狀態</th></tr>${rows}</table>
+      <h2>等級與徽章</h2>
+      <table class="tiertable"><tr><th>徽章</th><th>等級</th><th>門檻</th><th>狀態</th></tr>${rows}</table>
       <p class="muted">門檻分數為暫定值，正式施測前須依前導測試結果校準。</p>
     </div>
 
@@ -858,7 +883,7 @@ function renderSurvey(){
       ${likertHTML('ux', UX_ITEMS.map(u=>u[1]), 1)}
       <div class="qitem">
         <div class="qt"><b>${n + 1}.</b>在練習的過程中，你有沒有注意到答對會累積分數、
-          分數達到門檻可以取得證書並解鎖新的題型？</div>
+          分數達到門檻可以升級並取得證書？</div>
         <div class="lk col" oninput="lkMark(this)">
           <label><input type="radio" name="noticed" value="1"><span>有注意到</span></label>
           <label><input type="radio" name="noticed" value="0"><span>沒有注意到</span></label>
@@ -876,6 +901,7 @@ function renderSurvey(){
         <button class="main" onclick="surveyNext()">${last ? '送出' : '下一部分'}</button>
         <div id="svmsg" class="muted"></div>
       </div>
+      ${skipHtml(s.phase)}
     </div>`;
   renderProgress();
 }
@@ -991,10 +1017,16 @@ function surveyDone(phase){
    版面：深藍外框、白色圓角內框、金色側飾條、底部弧形飾帶與等級徽章
    ========================================================================= */
 const TIER_DESC = [
-  '能辨識最常見的四大詐騙型態之基本特徵',
-  '能在訊息中辨識超額報酬、權威宣稱等話術線索',
-  '能在多輪互動情境中判斷適當的中止與查證時機',
-  '能穩定辨識新興手法變體，並具備向他人說明之能力'
+  '踏出防詐練習的第一步',
+  '能辨識常見詐騙訊息的基本特徵',
+  '能留意訊息與畫面中的可疑線索',
+  '能在情境中判斷何時應停下來查證',
+  '能辨識超額報酬、權威身分等話術',
+  '能拆解多輪互動中的詐騙鋪陳',
+  '能穩定辨識各類詐騙型態',
+  '能辨識新興詐騙手法的變體',
+  '能向家人朋友說明詐騙的辨識方法',
+  '具備全面且穩定的防詐判斷能力'
 ];
 function drawCertificate(name){
   const t = CONFIG.tiers[P.tier_idx];
@@ -1092,7 +1124,8 @@ function drawCertificate(name){
   g.fill();
   g.strokeStyle = '#ffffff'; g.lineWidth = 3; g.beginPath(); g.arc(mx, my, 66, 0, Math.PI * 2); g.stroke();
   const rg = g.createRadialGradient(mx - 20, my - 20, 10, mx, my, 64);
-  rg.addColorStop(0, '#f1c46a'); rg.addColorStop(1, '#a8661f');
+  const tc = TIER_COLORS[P.tier_idx] || TIER_COLORS[0];
+  rg.addColorStop(0, tc[1]); rg.addColorStop(1, tc[0]);
   g.fillStyle = rg; g.beginPath(); g.arc(mx, my, 62, 0, Math.PI * 2); g.fill();
   g.strokeStyle = 'rgba(255,255,255,.75)'; g.lineWidth = 1.5; g.beginPath(); g.arc(mx, my, 54, 0, Math.PI * 2); g.stroke();
   g.fillStyle = '#ffffff'; g.font = '800 28px ' + SANS;
@@ -1164,7 +1197,8 @@ function renderSingle(q){
     <h2>${q.stem}</h2>
     ${renderMedia(q.media)}
     <div id="opts">${q.options.map((o,i)=>'<button class="opt" onclick="answerSingle('+i+')">'+o+'</button>').join('')}</div>
-    <div id="fb"></div></div>`;
+    <div id="fb"></div>
+    <button class="main ghost small" onclick="leaveRound()">回首頁</button></div>`;
   renderProgress();
   round.itemStart = Date.now();
 }
@@ -1182,7 +1216,7 @@ async function answerSingle(pick){
       <div>${q.explain}</div>
       ${q.tactic ? '<p class="muted" style="margin-top:8px;">這題使用的話術：'+q.tactic+'</p>' : ''}
     </div>
-    ${promoted ? '<div class="fb good"><div class="t">恭喜升級</div>你已取得「'+CONFIG.tiers[P.tier_idx].name+'」等級。</div>' : ''}
+    ${promoted ? '<div class="fb good promo">'+badgeSVG(P.tier_idx, true, 64)+'<div><div class="t">恭喜升級</div>你已取得「'+CONFIG.tiers[P.tier_idx].name+'」等級。</div></div>' : ''}
     <button class="main" onclick="advance()">下一題</button>`;
   renderProgress();
 }
@@ -1196,7 +1230,8 @@ function renderSim(q, r){
                : '<div class="chat">'+rd.chat.map(m=>'<div class="msg"><div class="who">'+m.who+'</div>'+m.text+'</div>').join('')+'</div>'}
     <p><b>${rd.q}</b></p>
     <div id="opts">${rd.options.map((o,i)=>'<button class="opt" onclick="answerSim('+r+','+i+')">'+o+'</button>').join('')}</div>
-    <div id="fb"></div></div>`;
+    <div id="fb"></div>
+    <button class="main ghost small" onclick="leaveRound()">回首頁</button></div>`;
   renderProgress();
   round.itemStart = Date.now();
 }
@@ -1215,7 +1250,7 @@ async function answerSim(r, pick){
       <div class="t">${ok ? '判斷正確　+'+CONFIG.gain+' 分' : '這樣做有風險　'+CONFIG.loss+' 分'}</div>
       <div>${rd.explain}</div>
     </div>
-    ${promoted ? '<div class="fb good"><div class="t">恭喜升級</div>你已取得「'+CONFIG.tiers[P.tier_idx].name+'」等級。</div>' : ''}
+    ${promoted ? '<div class="fb good promo">'+badgeSVG(P.tier_idx, true, 64)+'<div><div class="t">恭喜升級</div>你已取得「'+CONFIG.tiers[P.tier_idx].name+'」等級。</div></div>' : ''}
     <button class="main" onclick="${last ? 'advance()' : 'renderSim(round.items[round.i],'+(r+1)+')'}">
       ${last ? '完成這個情境' : '看下一幕'}</button>`;
   renderProgress();
@@ -1229,8 +1264,11 @@ function markOptions(pick, ans){
   });
 }
 
+/* 一筆作答紀錄是否代表「新的一題」：情境模擬題只在第 1 幕計數 */
+function isItemStart(h){ return h.sub_round == null || h.sub_round === 1; }
+
 async function recordAnswer(q, pick, ok, sub){
-  P.answered = (P.answered || 0) + 1;
+  if(sub === null || sub === 0) P.answered = (P.answered || 0) + 1;   // 情境模擬題一題只算一次
   const rec = {
     participant_id: me.id, session_id: round.sessionId,
     item_id: q.id, sub_round: (sub===null? null : sub+1),
@@ -1239,7 +1277,7 @@ async function recordAnswer(q, pick, ok, sub){
     response_ms: Date.now() - (round.itemStart || Date.now()),
     created_at: new Date().toISOString()
   };
-  HIST.push({ item_id:rec.item_id, is_correct:ok, created_at:rec.created_at, session_id:rec.session_id });
+  HIST.push({ item_id:rec.item_id, is_correct:ok, created_at:rec.created_at, session_id:rec.session_id, sub_round:rec.sub_round });
   if(online){ await sb.from('responses').insert(rec); }
   else { const l = lsGet(); l.log = l.log || []; l.log.push(rec); lsSet(l); }
 }
@@ -1596,7 +1634,7 @@ async function showUnsubscribe(token){
 /* =========================================================================
    複習回合：上次答錯的題目優先，不足五題時補上還沒做過的新題目
    ‧ 「答錯」以該題最近一次作答為準；情境模擬題任一幕答錯即視為答錯。
-   ‧ 只納入目前等級已解鎖的題型。
+   ‧ 三種題型都納入（已取消依等級解鎖題型）。
    ‧ 複習回合屬練習的一部分，計分方式相同；前後測與追蹤測驗仍使用固定題本。
    ========================================================================= */
 function reviewPool(){
@@ -1660,7 +1698,7 @@ const RETURN_REASONS = ['收到提醒信','想看新題目','想提升等級','�
 function returnCount(){
   if(!A.post || !A.post.created_at) return 0;
   const from = new Date(A.post.created_at).getTime() + RETURN_MIN_DAYS * 86400000;
-  return HIST.filter(h => h.created_at && new Date(h.created_at).getTime() >= from).length;
+  return HIST.filter(h => isItemStart(h) && h.created_at && new Date(h.created_at).getTime() >= from).length;
 }
 
 function renderReturn(){
@@ -1683,7 +1721,8 @@ function renderReturn(){
     <div class="svfoot">
       <button class="main" onclick="submitReturn()">送出</button>
       <div id="svmsg" class="muted"></div>
-    </div></div>`;
+    </div>
+    ${skipHtml('return')}</div>`;
   renderProgress();
 }
 
@@ -1723,6 +1762,123 @@ async function submitReturn(){
   app.innerHTML = `<div class="card"><h1>謝謝你的回饋</h1>
     <p>你的意見會用來改進題庫與網站。之後仍可繼續練習。</p>
     <button class="main" onclick="home()">回到首頁</button></div>`;
+}
+
+/* =========================================================================
+   測試模式與返回首頁
+   ‧ 網址加上 ?test=1 開啟測試模式（同一分頁內持續有效，?test=0 關閉）；
+     審核者預覽模式也視為測試模式。
+   ‧ 測試模式下，基本資料、前測、後測、追蹤測驗與回訪回饋的頁面最下方
+     會出現「略過這一步」。略過的步驟只記在這次瀏覽，不寫入資料庫，
+     重新整理後會再次出現。一般受試者看不到這個按鈕。
+   ========================================================================= */
+const TEST_KEY = 'antifraud_test_mode';
+var testMode = false;   // 用 var，避免啟動流程較早呼叫時尚未宣告
+(function initTestMode(){
+  const v = new URLSearchParams(location.search).get('test');
+  try{
+    if(v === '1') sessionStorage.setItem(TEST_KEY, '1');
+    if(v === '0') sessionStorage.removeItem(TEST_KEY);
+    testMode = sessionStorage.getItem(TEST_KEY) === '1';
+  }catch(e){ testMode = v === '1'; }
+  if(testMode){
+    document.body.insertAdjacentHTML('afterbegin',
+      '<div style="position:sticky;top:0;z-index:98;background:#8a5a00;color:#fff;text-align:center;'
+      + 'padding:6px 12px;font-size:.8em;font-weight:bold">測試模式：各步驟可略過，略過的步驟不會寫入資料庫</div>');
+  }
+})();
+function canSkip(){ return testMode || reviewer; }
+
+function skipHtml(step){
+  if(!canSkip()) return '';
+  return `<div class="skipbox"><button onclick="skipStep('${step}')">略過這一步（測試用）</button>
+    <div class="muted">略過的步驟不會寫入資料庫，重新整理頁面後會再出現。</div></div>`;
+}
+
+function skipStep(step){
+  const now = new Date().toISOString();
+  if(step === 'profile'){
+    me.age_group = me.age_group || '（測試略過）';
+  }else{
+    A[step] = { phase:step, skipped:true, created_at:now };
+    survey = null;
+  }
+  window.scrollTo(0, 0);
+  home();
+}
+
+function goHome(){
+  if(round) return leaveRound();
+  survey = null;
+  window.scrollTo(0, 0);
+  home();
+}
+
+async function leaveRound(){
+  // 中途離開：已作答的題目都已即時記錄，這裡只補上回合的結束時間與題數
+  if(round && online && round.sessionId && round.i < round.items.length){
+    sb.from('sessions').update({ ended_at:new Date().toISOString(),
+      items_count:round.i, correct_count:round.correct }).eq('id', round.sessionId).then(()=>{});
+  }
+  round = null;
+  window.scrollTo(0, 0);
+  home();
+}
+
+/* =========================================================================
+   等級徽章（SVG）：多邊形外框隨等級增加邊數，顏色依段位名稱變化，
+   中央為皇冠與等級數字；尚未取得的等級以灰階顯示。
+   ========================================================================= */
+var TIER_COLORS = [   // [主色, 亮色, 外框色]
+  ['#5b6169', '#a3a9b1', '#8d939b'],   // 鐵牌
+  ['#a8622b', '#e6a46d', '#c98a55'],   // 銅牌
+  ['#7d8ea3', '#e4ecf5', '#b9c6d6'],   // 銀牌
+  ['#d9951c', '#ffd863', '#e8b54a'],   // 金牌
+  ['#1f9e93', '#8fe8dc', '#6fcfc4'],   // 白金
+  ['#12924a', '#6fe3a3', '#4cc584'],   // 翡翠
+  ['#2f6fe0', '#a9cbff', '#7aa8f5'],   // 鑽石
+  ['#7c3aed', '#d4bcff', '#a98af2'],   // 大師
+  ['#d1252f', '#ff9a9a', '#ef6b6b'],   // 宗師
+  ['#f2a20c', '#5fd4ff', '#ffd36b']    // 菁英（金與天藍）
+];
+var TIER_SIDES = [6, 6, 6, 7, 7, 8, 8, 9, 10, 12];
+var badgeSeq = 0;
+function badgeSVG(idx, earned, size){
+  const c = TIER_COLORS[idx] || TIER_COLORS[0], n = TIER_SIDES[idx] || 6, id = 'bg' + (++badgeSeq);
+  const poly = (r, cx = 60, cy = 56) => Array.from({ length:n }, (_, k) => {
+    const a = -Math.PI / 2 + k * 2 * Math.PI / n;
+    return (cx + r * Math.cos(a)).toFixed(1) + ',' + (cy + r * Math.sin(a)).toFixed(1);
+  }).join(' ');
+  const shade = (hex, k) => '#' + [1, 3, 5].map(i => Math.round(parseInt(hex.substr(i, 2), 16) * k)
+    .toString(16).padStart(2, '0')).join('');
+  const top = c[1], deep = c[0], dark = shade(c[0], .72);
+  return `<svg class="badge ${earned ? '' : 'off'}" width="${size}" height="${size}" viewBox="0 0 120 120" aria-label="${CONFIG.tiers[idx].name}徽章">
+  <defs>
+    <linearGradient id="${id}r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff6e0"/><stop offset=".35" stop-color="${c[2]}"/><stop offset="1" stop-color="${deep}"/></linearGradient>
+    <linearGradient id="${id}b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${top}"/><stop offset="1" stop-color="${deep}"/></linearGradient>
+    <linearGradient id="${id}k" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${idx === 9 ? '#ffcf4a' : deep}"/><stop offset="1" stop-color="${idx === 9 ? '#1f8fd6' : dark}"/></linearGradient>
+    <clipPath id="${id}c"><polygon points="${poly(41)}"/></clipPath>
+  </defs>
+  <ellipse cx="60" cy="112" rx="34" ry="5" fill="rgba(0,0,0,.25)"/>
+  <polygon points="${poly(50)}" fill="url(#${id}r)" stroke="${c[2]}" stroke-width="5" stroke-linejoin="round"/>
+  <polygon points="${poly(41)}" fill="#ffffff"/>
+  <polygon points="${poly(41)}" fill="none" stroke="#fff" stroke-width="2" opacity=".9"/>
+  <g clip-path="url(#${id}c)">
+    <polygon points="0,0 120,0 120,8 0,40" fill="url(#${id}b)" opacity=".9"/>
+    <polygon points="0,108 120,76 120,120 0,120" fill="url(#${id}b)" opacity=".9"/>
+    <line x1="0" y1="47" x2="120" y2="15" stroke="${c[2]}" stroke-width="2.2"/>
+    <line x1="0" y1="101" x2="120" y2="69" stroke="${c[2]}" stroke-width="2.2"/>
+    <ellipse cx="40" cy="24" rx="28" ry="10" fill="#fff" opacity=".45" transform="rotate(-16 40 24)"/>
+  </g>
+  <g>
+    <path d="M34 50 L46 60 L60 40 L74 60 L86 50 L82 78 L38 78 Z" fill="url(#${id}k)" stroke="#fff" stroke-width="3" stroke-linejoin="round"/>
+    <rect x="37" y="80" width="46" height="7" rx="2" fill="url(#${id}k)" stroke="#fff" stroke-width="2"/>
+    <circle cx="34" cy="46" r="3.6" fill="${c[2]}" stroke="#fff" stroke-width="1.5"/>
+    <circle cx="60" cy="35" r="3.6" fill="${c[2]}" stroke="#fff" stroke-width="1.5"/>
+    <circle cx="86" cy="46" r="3.6" fill="${c[2]}" stroke="#fff" stroke-width="1.5"/>
+    <text x="60" y="72" text-anchor="middle" font-size="17" font-weight="800" fill="#fff" stroke="${dark}" stroke-width="1.5" paint-order="stroke" font-family="Arial,sans-serif">${idx + 1}</text>
+  </g>
+</svg>`;
 }
 </script>
 </body>
