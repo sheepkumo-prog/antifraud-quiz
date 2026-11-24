@@ -203,6 +203,14 @@ button.main.small{padding:10px 18px;font-size:.85em;margin-top:14px;}
 .skipbox button{background:transparent;color:#ffcf7a;border:1px dashed rgba(255,190,80,.7);border-radius:10px;
   padding:10px 16px;font-family:inherit;font-size:.85em;cursor:pointer;width:100%;}
 .skipbox .muted{margin-top:6px;}
+.codebox{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:12px 0;padding:12px 14px;
+  border:1px solid rgba(110,160,255,.45);border-radius:10px;background:rgba(59,130,255,.10);}
+.codebox .lbl{color:var(--sub);font-size:.85em;}
+.codebox b{font-size:1.25em;letter-spacing:2px;font-variant-numeric:tabular-nums;color:#fff;}
+.copybtn{background:linear-gradient(90deg,#1f5bff,#3b9bff);color:#fff;border:none;border-radius:8px;
+  padding:8px 14px;font-family:inherit;font-size:.85em;font-weight:700;cursor:pointer;}
+.pinnote{background:rgba(240,180,41,.10);border-left:5px solid #f0b429;border-radius:8px;padding:10px 14px;
+  font-size:.88em;margin:8px 0 6px;}
 /* 等級徽章 */
 .tierbox{display:flex;align-items:center;gap:8px;}
 .pbadge svg{display:block;filter:drop-shadow(0 0 10px rgba(110,160,255,.45));}
@@ -1496,22 +1504,44 @@ const FALLBACK_BANK = [
    ========================================================================= */
 function accountCards(){
   if(!online || reviewer) return '';
+  const codeBox = `<div class="codebox">
+      <span class="lbl">我的編號</span><b id="mycode">${esc(me.guest_code)}</b>
+      <button class="copybtn" onclick="copyCode()">複製編號</button>
+      <span id="copymsg" class="muted"></span>
+    </div>
+    <div class="pinnote"><b>提醒：</b>換手機或瀏覽器找回進度時，<b>編號與 PIN 兩個都要輸入</b>，缺一不可。
+      請把編號複製到記事本、傳給自己，或截圖保存；研究者無法替你查詢編號或 PIN。</div>`;
   const pinCard = me.recovery_set
     ? `<div class="card">
         <h2>換手機也能接續進度</h2>
-        <p>你的編號是 <b>${esc(me.guest_code)}</b>，已設定回復 PIN。換手機或瀏覽器時，
-           在第一個畫面選「用回復碼找回進度」，輸入編號與 PIN 即可。</p>
+        <p>你已設定回復 PIN。換手機或瀏覽器時，在第一個畫面選「用回復碼找回進度」，輸入下方的編號與你的 PIN 即可。</p>
+        ${codeBox}
         <button class="main ghost" onclick="pinForm()">更改 PIN</button>
         <div id="pinbox"></div>
       </div>`
     : `<div class="card">
         <h2>保存你的進度</h2>
-        <p>目前的紀錄只存在這台裝置。設定一組 4 位數 PIN 後，換手機或瀏覽器時輸入
-           編號 <b>${esc(me.guest_code)}</b> 與 PIN，就能找回分數、等級與作答紀錄。</p>
-        <p class="muted">請把編號與 PIN 記下來或拍照保存，研究者無法替你查詢 PIN。</p>
+        <p>目前的紀錄只存在這台裝置。設定一組 4 位數 PIN 後，換手機或瀏覽器時輸入編號與 PIN，就能找回分數、等級與作答紀錄。</p>
+        ${codeBox}
         <div id="pinbox">${pinInputs()}</div>
       </div>`;
   return pinCard + subscribeCard();
+}
+
+function copyCode(){
+  const code = me.guest_code, msg = document.getElementById('copymsg');
+  const done = ok => { if(msg) msg.textContent = ok ? '已複製 ' + code : '複製失敗，請手動記下編號'; };
+  if(navigator.clipboard && window.isSecureContext){
+    navigator.clipboard.writeText(code).then(() => done(true), () => fallback());
+  }else fallback();
+  function fallback(){
+    try{
+      const t = document.createElement('textarea');
+      t.value = code; t.style.position = 'fixed'; t.style.opacity = '0';
+      document.body.appendChild(t); t.select();
+      const ok = document.execCommand('copy'); t.remove(); done(ok);
+    }catch(e){ done(false); }
+  }
 }
 
 function pinInputs(){
@@ -1537,7 +1567,8 @@ async function savePin(){
 function restoreForm(){
   app.innerHTML = `<div class="card">
     <h1>用回復碼找回進度</h1>
-    <p>請輸入之前網站給你的編號（例如 G-1A2B3C4D）與你設定的 4 位數 PIN。</p>
+    <p>請輸入之前網站給你的<b>編號</b>（例如 G-1A2B3C4D）與你設定的 <b>4 位數 PIN</b>，兩個都要輸入才能找回進度。</p>
+    <p class="muted">編號在原本那台裝置首頁的「換手機也能接續進度」卡片裡，可按「複製編號」保存。</p>
     <label>編號<input id="rcode" autocomplete="off" placeholder="G-"></label>
     <label>PIN<input id="rpin" inputmode="numeric" maxlength="4" autocomplete="off"></label>
     <button class="main" onclick="doRestore()">找回進度</button>
