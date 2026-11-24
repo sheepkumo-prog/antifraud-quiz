@@ -318,6 +318,9 @@ const RETURN_MIN_DAYS = 1;   // 後測完成後至少隔幾天的作答才算「
 const MINOR_AGE = '18 歲以下';
 const isMinor = () => me && me.age_group === MINOR_AGE;
 
+/* 後測獎勵偏好題（論文 2.5.1、3.5 節）：虛擬獎勵與有形獎勵的偏好比較 */
+const REWARD_PREFS = ['等級徽章與累積分數','數位證書','實體小禮物或抽獎','禮券或點數回饋','不需要獎勵，有新題目就會回來'];
+
 const LIKERT = ['非常不同意','不同意','普通','同意','非常同意'];
 
 const TEST_FORMS = {
@@ -896,6 +899,13 @@ function renderSurvey(){
           <label><input type="radio" name="noticed" value="1"><span>有注意到</span></label>
           <label><input type="radio" name="noticed" value="0"><span>沒有注意到</span></label>
         </div>
+      </div>
+      <div class="qitem">
+        <div class="qt"><b>${n + 2}.</b>以下哪一種回饋，最能吸引你之後再回來練習？（單選）</div>
+        <p class="muted">本研究不提供獎品，此題僅了解你的偏好。</p>
+        <div class="lk col" oninput="lkMark(this)">
+          ${REWARD_PREFS.map((r,i)=>'<label><input type="radio" name="rewardpref" value="'+i+'"><span>'+r+'</span></label>').join('')}
+        </div>
       </div>`;
   }
 
@@ -937,8 +947,9 @@ function surveyNext(){
   }else{
     const ux = collect('ux', UX_ITEMS.length);
     const nt = document.querySelector('input[name="noticed"]:checked');
-    if(!ux || !nt){ msg.textContent = '還有題目沒有作答，請全部選完再送出。'; return; }
-    s.ux = ux; s.noticed = nt.value === '1';
+    const rp = document.querySelector('input[name="rewardpref"]:checked');
+    if(!ux || !nt || !rp){ msg.textContent = '還有題目沒有作答，請全部選完再送出。'; return; }
+    s.ux = ux; s.noticed = nt.value === '1'; s.rewardPref = REWARD_PREFS[Number(rp.value)];
   }
 
   if(s.step < steps.length - 1){
@@ -971,6 +982,7 @@ async function submitSurvey(){
     susceptibility: s.sus,
     ux_survey: s.phase === 'post' ? s.ux : null,
     noticed_mechanism: s.phase === 'post' ? s.noticed : null,
+    reward_pref: s.phase === 'post' ? s.rewardPref : null,
     guardian_consent: (s.phase === 'pre' && isMinor()) ? s.guardian : null,
     duration_ms: Date.now() - s.t0,
     created_at: new Date().toISOString()
