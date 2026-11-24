@@ -502,7 +502,7 @@ async function boot(){
     lsSet(local);
     me = { id:null, guest_code:local.guest_code, age_group:local.age_group||null,
            gender:local.gender||null, education:local.education||null, news_freq:local.news_freq||null };
-    P = { score:local.score, tier_idx:local.tier_idx, visits:local.visits,
+    P = { score:local.score, tier_idx:Math.min(9, Math.max(local.tier_idx || 0, tierOf(local.score || 0))), visits:local.visits,
           cert_downloads:local.cert_downloads || 0, answered:(local.log||[]).filter(isItemStart).length };
     A = local.assessments || {};
     HIST = local.log || [];
@@ -1113,33 +1113,11 @@ function drawCertificate(name){
   sig(270, '防詐練習網', '核 發 單 位');
   sig(W - 270, new Date().toLocaleDateString('zh-TW'), '核 發 日 期');
 
-  // 等級徽章
-  const mx = W / 2, my = 760, R = 92;
-  g.fillStyle = '#ffffff'; g.beginPath(); g.arc(mx, my, R + 10, 0, Math.PI * 2); g.fill();
-  g.fillStyle = NAVY; g.beginPath();
-  for (let i = 0; i <= 48; i++) {
-    const a = i / 48 * Math.PI * 2, r = i % 2 ? R : R - 9;
-    g.lineTo(mx + Math.cos(a) * r, my + Math.sin(a) * r);
-  }
-  g.fill();
-  g.strokeStyle = '#ffffff'; g.lineWidth = 3; g.beginPath(); g.arc(mx, my, 66, 0, Math.PI * 2); g.stroke();
-  const rg = g.createRadialGradient(mx - 20, my - 20, 10, mx, my, 64);
-  const tc = TIER_COLORS[P.tier_idx] || TIER_COLORS[0];
-  rg.addColorStop(0, tc[1]); rg.addColorStop(1, tc[0]);
-  g.fillStyle = rg; g.beginPath(); g.arc(mx, my, 62, 0, Math.PI * 2); g.fill();
-  g.strokeStyle = 'rgba(255,255,255,.75)'; g.lineWidth = 1.5; g.beginPath(); g.arc(mx, my, 54, 0, Math.PI * 2); g.stroke();
-  g.fillStyle = '#ffffff'; g.font = '800 28px ' + SANS;
-  g.fillText(t.name.slice(0, 2), mx, my - 2);
-  g.fillText(t.name.slice(2), mx, my + 30);
-  const star = (x, y, r) => {
-    g.beginPath();
-    for (let i = 0; i < 10; i++) {
-      const a = -Math.PI / 2 + i * Math.PI / 5, rr2 = i % 2 ? r * .45 : r;
-      g.lineTo(x + Math.cos(a) * rr2, y + Math.sin(a) * rr2);
-    }
-    g.fill();
-  };
-  star(mx, my - 40, 7); star(mx - 40, my + 6, 5); star(mx + 40, my + 6, 5);
+  // 等級徽章：使用與網站相同的 SVG 徽章（圖片載入後才會畫上，見 loadCertBadge）
+  const mx = W / 2, my = 762;
+  g.fillStyle = '#ffffff'; g.beginPath(); g.arc(mx, my, 104, 0, Math.PI * 2); g.fill();
+  const bimg = CERT_BADGE[P.tier_idx];
+  if (bimg && bimg.complete && bimg.naturalWidth) g.drawImage(bimg, mx - 105, my - 98, 210, 210);
 
   // 頁尾
   g.fillStyle = '#8a8a8a'; g.font = '16px ' + SANS;
@@ -1148,6 +1126,7 @@ function drawCertificate(name){
 }
 
 async function downloadCert(){
+  await loadCertBadge(P.tier_idx);
   const nm = certName();
   const m0 = document.getElementById('certmsg');
   if(!nm){ if(m0) m0.textContent = '請先在上方輸入要顯示在證書上的姓名。'; document.getElementById('certname').focus(); return; }
@@ -1332,9 +1311,23 @@ function updateCertName(){
   try{ localStorage.setItem(CERT_NAME_KEY, certName()); }catch(e){}
   paintCert();
 }
+const CERT_BADGE = {};
+function loadCertBadge(idx){
+  // 把徽章 SVG 轉成圖片，供證書的 Canvas 繪製
+  if (CERT_BADGE[idx] && CERT_BADGE[idx].complete) return Promise.resolve();
+  return new Promise(res => {
+    const img = new Image();
+    img.onload = () => res(); img.onerror = () => res();
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(badgeSVG(idx, true, 420));
+    CERT_BADGE[idx] = img;
+  });
+}
 function paintCert(){
   const box = document.getElementById('certbox');
   if(!box) return;
+  if (!(CERT_BADGE[P.tier_idx] && CERT_BADGE[P.tier_idx].complete)) {
+    loadCertBadge(P.tier_idx).then(() => paintCert());
+  }
   const c = drawCertificate(certName());
   c.style.maxWidth = '100%';
   c.style.borderRadius = '8px';
@@ -1852,7 +1845,7 @@ function badgeSVG(idx, earned, size){
   const shade = (hex, k) => '#' + [1, 3, 5].map(i => Math.round(parseInt(hex.substr(i, 2), 16) * k)
     .toString(16).padStart(2, '0')).join('');
   const top = c[1], deep = c[0], dark = shade(c[0], .72);
-  return `<svg class="badge ${earned ? '' : 'off'}" width="${size}" height="${size}" viewBox="0 0 120 120" aria-label="${CONFIG.tiers[idx].name}徽章">
+  return `<svg xmlns="http://www.w3.org/2000/svg" class="badge ${earned ? '' : 'off'}" width="${size}" height="${size}" viewBox="0 0 120 120" aria-label="${CONFIG.tiers[idx].name}徽章">
   <defs>
     <linearGradient id="${id}r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff6e0"/><stop offset=".35" stop-color="${c[2]}"/><stop offset="1" stop-color="${deep}"/></linearGradient>
     <linearGradient id="${id}b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${top}"/><stop offset="1" stop-color="${deep}"/></linearGradient>
