@@ -122,6 +122,18 @@ label{display:block;margin-top:12px;font-size:.9em;}
   align-items:center;justify-content:center;color:rgba(179,38,30,.26);
   font-size:1.3em;font-weight:800;letter-spacing:6px;transform:rotate(-22deg);pointer-events:none;}
 
+
+/* 模擬畫面點擊放大 */
+.media.zoomable{cursor:zoom-in;}
+.media.zoomable:focus-visible{outline:3px solid var(--accent);outline-offset:6px;border-radius:12px;}
+.media.zoomable::after{content:"點畫面可放大查看";display:block;text-align:center;font-size:14px;color:var(--sub);margin-top:8px;}
+.zoomov{position:fixed;inset:0;z-index:9999;background:rgba(2,6,14,.9);overflow:auto;cursor:zoom-out;
+  display:flex;flex-direction:column;align-items:center;padding:56px 3vw 24px;box-sizing:border-box;}
+.zoomstage{margin:auto 0;}
+.zoomstage > *{margin:0 auto;}
+.zoomclose{position:fixed;top:12px;right:14px;width:44px;height:44px;border-radius:50%;border:1px solid #fff6;
+  background:#0b1322;color:#fff;font-size:26px;line-height:1;cursor:pointer;}
+.zoomtip{color:#c9d4e6;font-size:15px;margin:14px 0 0;text-align:center;}
 /* =====================================================================
    深色科技風主題（v5）
    ‧ 文字與背景維持高對比，沿用 2.5.2 節之高齡友善原則。
@@ -551,7 +563,7 @@ function esc(s){ return String(s==null?'':s).replace(/[&<>]/g, c=>({'&':'&amp;',
 function renderMedia(m){
   if(!m || !m.kind) return '';
   if(m.kind === 'line'){
-    return '<div class="media"><div class="phone fakemark">'
+    return '<div class="media zoomable" role="button" tabindex="0" aria-label="點擊放大查看畫面" title="點擊放大"><div class="phone fakemark">'
       + '<div class="line-bar"><div class="av"></div><div>'+esc(m.title||'')+'</div></div>'
       + '<div class="line-body">'
       + (m.time ? '<div class="ltime">'+esc(m.time)+'</div>' : '')
@@ -559,14 +571,14 @@ function renderMedia(m){
       + '</div></div></div>';
   }
   if(m.kind === 'sms'){
-    return '<div class="media"><div class="smsbox fakemark">'
+    return '<div class="media zoomable" role="button" tabindex="0" aria-label="點擊放大查看畫面" title="點擊放大"><div class="smsbox fakemark">'
       + '<div class="sms-bar">'+esc(m.from||'')+'</div>'
       + '<div class="sms-body"><div class="sbub">'+esc(m.text||'')
       + (m.link ? '<br><span class="slink">'+esc(m.link)+'</span>' : '')
       + '</div></div></div></div>';
   }
   if(m.kind === 'app'){
-    return '<div class="media"><div class="appbox fakemark">'
+    return '<div class="media zoomable" role="button" tabindex="0" aria-label="點擊放大查看畫面" title="點擊放大"><div class="appbox fakemark">'
       + '<div class="app-bar"><span>'+esc(m.name||'')+'</span><span>'+esc(m.time||'')+'</span></div>'
       + '<div class="app-body">'
       + '<div style="font-size:.68em;opacity:.7;">帳戶總值</div>'
@@ -579,7 +591,7 @@ function renderMedia(m){
       + '</div></div></div>';
   }
   if(m.kind === 'doc'){
-    return '<div class="media"><div class="docbox fakemark">'
+    return '<div class="media zoomable" role="button" tabindex="0" aria-label="點擊放大查看畫面" title="點擊放大"><div class="docbox fakemark">'
       + (m.seal ? '<div class="seal">'+esc(m.seal)+'</div>' : '')
       + '<h3>'+esc(m.title||'')+'</h3>'
       + (m.lines||[]).map(l=>'<div>'+esc(l)+'</div>').join('')
@@ -588,6 +600,42 @@ function renderMedia(m){
   }
   return '';
 }
+
+
+/* ---------------- 模擬畫面點擊放大 ---------------- */
+function openZoom(el){
+  const box = el.firstElementChild; if(!box || document.querySelector('.zoomov')) return;
+  const w = box.getBoundingClientRect().width || 340;
+  const vw = Math.min(window.innerWidth, document.documentElement.clientWidth || window.innerWidth);
+  const avail = vw * 0.94;
+  const z = Math.max(1.5, Math.min(2.4, avail / w));        // 至少放大 1.5 倍
+  const ov = document.createElement('div');
+  ov.className = 'zoomov';
+  ov.setAttribute('role','dialog'); ov.setAttribute('aria-modal','true'); ov.setAttribute('aria-label','放大檢視模擬畫面');
+  ov.innerHTML = '<button type="button" class="zoomclose" aria-label="關閉放大畫面">×</button><div class="zoomstage"></div><p class="zoomtip">點任意處或按 Esc 關閉</p>';
+  const c = box.cloneNode(true);
+  c.style.maxWidth = 'none';
+  c.style.width = Math.min(w, avail / z) + 'px';            // 手機上窄版重排，字一樣放大
+  c.style.zoom = z;
+  ov.querySelector('.zoomstage').appendChild(c);
+  document.body.appendChild(ov);
+  const prevOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+  function close(){ ov.remove(); document.body.style.overflow = prevOverflow; document.removeEventListener('keydown', onKey); try{ el.focus(); }catch(e){} }
+  function onKey(e){ if(e.key === 'Escape') close(); }
+  ov.addEventListener('click', close);
+  document.addEventListener('keydown', onKey);
+  ov.querySelector('.zoomclose').focus();
+}
+document.addEventListener('click', e => {
+  const m = e.target.closest && e.target.closest('.media.zoomable');
+  if(m) openZoom(m);
+});
+document.addEventListener('keydown', e => {
+  if((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('zoomable')){
+    e.preventDefault(); openZoom(e.target);
+  }
+});
 
 /* ---------------- 進度列 ---------------- */
 function tierOf(score){ let i=0; CONFIG.tiers.forEach((t,idx)=>{ if(score>=t.min) i=idx; }); return i; }
